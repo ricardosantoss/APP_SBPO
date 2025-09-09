@@ -237,6 +237,7 @@ tabs = st.tabs(["🗂️ Dashboard", "📊 Estatísticas", "🧪 Exemplos"])
 
 
 # ================== DASHBOARD ==================
+# ================== DASHBOARD ==================
 with tabs[0]:
     style_title("Dashboard")
 
@@ -268,10 +269,10 @@ with tabs[0]:
             st.warning("Sem dados para esse filtro.")
             st.stop()
 
-        # Resolve nomes das colunas de métricas (para a agregação escolhida)
+        # Resolve nomes das colunas de métricas
         metric_cols = resolve_metric_columns(view, agg_choice)
 
-        # Ordena por F1 para ficar confortável
+        # Ordena por F1
         view = view.sort_values(metric_cols["f1"], ascending=False)
 
         # Tabela (opcional) com nomes bonitos
@@ -297,17 +298,16 @@ with tabs[0]:
             plot_rows.append({"Modelo": modelo, "Métrica": "Recall",   "Valor": float(r[metric_cols["recall"]])})
             plot_rows.append({"Modelo": modelo, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
         df_plot = pd.DataFrame(plot_rows)
-
-        # Desduplicação pós-pretty
         df_plot = df_plot.groupby(["Modelo", "Métrica"], as_index=False, sort=False)["Valor"].max()
-
-        # Destacar agregados
+        
         HIGHLIGHT = {"Borda", "Pluralidade"}
         df_plot["Agregado"] = df_plot["Modelo"].isin(HIGHLIGHT)
-
-        # Ordena os modelos pelo F1-Score (decrescente) para o eixo X
+        
         df_f1_scores = df_plot[df_plot["Métrica"] == "F1"].sort_values("Valor", ascending=False)
         order_domain = df_f1_scores["Modelo"].tolist()
+
+        # ADAPTADO: CALCULA O MELHOR MODELO ANTES DO GRÁFICO
+        info = best_individual_delta(view, metric_cols["f1"])
 
         # --- Gráfico de Barras Agrupadas ---
         try:
@@ -315,51 +315,53 @@ with tabs[0]:
 
             METRIC_COLORS = {"Precisão": COLOR_PREC, "Recall": COLOR_REC, "F1": COLOR_F1}
 
-            # Base: todos os modelos com cores vivas
             base = (
-                alt.Chart(df_plot)
-                .mark_bar()
-                .encode(
+                alt.Chart(df_plot).mark_bar().encode(
                     x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain), axis=alt.Axis(title=None, labelAngle=0, labelFontSize=14, labelColor="#222")),
                     y=alt.Y("Valor:Q", title=f"{agg_choice} (valor)"),
                     color=alt.Color("Métrica:N", scale=alt.Scale(domain=list(METRIC_COLORS.keys()), range=[METRIC_COLORS[m] for m in METRIC_COLORS]), legend=alt.Legend(title="Métrica")),
                     xOffset="Métrica:N",
                     tooltip=["Modelo", "Métrica", alt.Tooltip("Valor:Q", format=".4f")]
-                )
-                .properties(height=460)
+                ).properties(height=460)
             )
 
-            # Overlay: Usa APENAS o contorno para destacar Borda/Pluralidade
             overlay = (
-                alt.Chart(df_plot[df_plot["Agregado"]])
-                .mark_bar(stroke="#111", strokeWidth=2, filled=False)
-                .encode(
+                alt.Chart(df_plot[df_plot["Agregado"]]).mark_bar(stroke="#111", strokeWidth=2, filled=False).encode(
                     x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain), axis=alt.Axis(title=None)),
                     y=alt.Y("Valor:Q"),
                     xOffset="Métrica:N",
                 )
             )
             
-            # Adiciona os RÓTULOS (texto) no topo das barras
             text = base.mark_text(
                 align='center', baseline='bottom', dy=-5, fontSize=11
             ).encode(
                 text=alt.Text('Valor:Q', format='.3f'),
                 color=alt.value('black'),
-                xOffset="Métrica:N", # Para centralizar o texto em cada barra
+                xOffset="Métrica:N",
             )
+            
+            # ADAPTADO: Cria e adiciona a camada da linha de referência
+            chart_layers = [base, overlay, text]
+            if info:
+                best_name, best_val, val_borda, val_plural, d_borda, d_plural = info
+                rule = alt.Chart(pd.DataFrame({'y': [best_val]})).mark_rule(
+                    color='red',
+                    strokeWidth=2,
+                    strokeDash=[5, 3] # Linha tracejada
+                ).encode(y='y:Q')
+                chart_layers.append(rule)
 
-            chart = (base + overlay + text)
+            # Junta todas as camadas
+            chart = alt.layer(*chart_layers)
             st.altair_chart(chart, use_container_width=True)
 
         except Exception:
             st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
             st.dataframe(df_plot.pivot(index="Modelo", columns="Métrica", values="Valor").reindex(order_domain), use_container_width=True)
 
-        # Δ vs. melhor modelo individual
-        info = best_individual_delta(view, metric_cols["f1"])
+        # A exibição dos chips continua aqui no final, usando a variável 'info'
         if info:
-            best_name, best_val, val_borda, val_plural, d_borda, d_plural = info
             style_subtitle("Δ vs. melhor modelo individual (pela F1)")
             chip("Melhor Individual", f"{pretty_model_name(best_name)} ({best_val:.4f})", bg=PRIMARY)
             if val_borda is not None:
@@ -367,24 +369,18 @@ with tabs[0]:
             if val_plural is not None:
                 chip("Pluralidade", f"{val_plural:.4f} ({'+' if d_plural>=0 else ''}{d_plural:.4f})", bg=SECOND)
 
-        # --- MODO 2: ANALISAR 'k' POR MODELO (CORRIGIDO) ---
+    # --- MODO 2: ANALISAR 'k' POR MODELO ---
     else:
         # Filtros: Tipo, Modelo e Agregação
         colA, colB, colC = st.columns([1, 2, 1], gap="medium")
-        
         with colA:
             tipos = sorted(df["Tipo"].dropna().unique().tolist()) if "Tipo" in df.columns else ["Full"]
             tipo = st.selectbox("Tipo", tipos, index=0)
 
-        # A LÓGICA FOI AJUSTADA AQUI
         with colB:
-            # 1. Filtra o DataFrame pelo 'Tipo' selecionado PRIMEIRO
             df_tipo_filtrado = df[df["Tipo"] == tipo]
-
-            # 2. Agora, cria a lista de modelos a partir do DataFrame já filtrado
             modelos_unicos = df_tipo_filtrado["Modelo"].dropna().unique()
             mapa_nomes = {m: pretty_model_name(m) for m in modelos_unicos}
-            
             nomes_bonitos_ordenados = sorted(list(set(mapa_nomes.values())))
             
             if not nomes_bonitos_ordenados:
@@ -392,14 +388,11 @@ with tabs[0]:
                 st.stop()
 
             modelo_selecionado_pretty = st.selectbox("Modelo", nomes_bonitos_ordenados, index=0)
-            
-            # 3. A busca pelo nome original agora não tem ambiguidade
             modelo_original = [orig for orig, pretty in mapa_nomes.items() if pretty == modelo_selecionado_pretty][0]
 
         with colC:
             agg_choice = st.radio("Agregação", ["Micro", "Macro"], index=0, horizontal=True)
 
-        # O filtro principal agora usa o 'df_tipo_filtrado' para mais eficiência
         mask = (df_tipo_filtrado["Modelo"] == modelo_original)
         view_k = df_tipo_filtrado.loc[mask].copy()
 
@@ -407,7 +400,6 @@ with tabs[0]:
             st.warning("Sem dados para este modelo e tipo. Tente outra combinação.")
             st.stop()
 
-        # Prepara dados para o gráfico de linhas
         metric_cols = resolve_metric_columns(view_k, agg_choice)
         plot_rows_k = []
         for _, r in view_k.iterrows():
@@ -417,7 +409,6 @@ with tabs[0]:
             plot_rows_k.append({"k": k_val, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
         df_plot_k = pd.DataFrame(plot_rows_k)
 
-        # --- Gráfico de Linhas ---
         try:
             import altair as alt
 

@@ -349,6 +349,7 @@ with tabs[0]:
             chip("Pluralidade", f"{val_plural:.4f} ({'+' if d_plural>=0 else ''}{d_plural:.4f})", bg=SECOND)
 
 # ================== ESTATÍSTICAS ==================
+# ================== ESTATÍSTICAS ==================
 with tabs[1]:
     style_title("Estatísticas")
 
@@ -385,6 +386,93 @@ with tabs[1]:
             st.altair_chart(chart2, use_container_width=True)
         except Exception:
             st.dataframe(df_top.sort_values("Contagem", ascending=False), use_container_width=True)
+
+    st.divider()
+
+    # ================== Cobertura do OURO (3-char e full) ==================
+    style_subtitle("Cobertura do ouro")
+
+    # ---- 3-char (temos no stats.json) ----
+    dist3 = stats.get("Distribuicao_3char", {}) or {}
+    if dist3:
+        pares3 = sorted(dist3.items(), key=lambda x: x[1], reverse=True)
+        total3 = sum(v for _, v in pares3) or 1
+        top10_3 = pares3[:10]
+        top20_3 = pares3[:20]
+
+        pct10_3 = 100.0 * sum(v for _, v in top10_3) / total3
+        pct20_3 = 100.0 * sum(v for _, v in top20_3) / total3
+
+        cA, cB, cC = st.columns(3)
+        cA.metric("Categorias 3-char distintas (ouro)", f"{len(pares3)}")
+        cB.metric("%Top-10 (3-char)", f"{pct10_3:.1f}%")
+        cC.metric("%Top-20 (3-char)", f"{pct20_3:.1f}%")
+
+        # gráfico dos 10 mais do ouro (3-char)
+        try:
+            import altair as alt
+            df_top3 = pd.DataFrame({"Categoria (3-char)": [k for k,_ in top10_3],
+                                    "Contagem": [v for _,v in top10_3]})
+            df_top3 = df_top3.sort_values("Contagem", ascending=True)
+            chart_o3 = (
+                alt.Chart(df_top3)
+                .mark_bar(color="#10B981")
+                .encode(
+                    x=alt.X("Contagem:Q"),
+                    y=alt.Y("Categoria (3-char):N", sort=None),
+                    tooltip=["Categoria (3-char)", "Contagem"]
+                )
+                .properties(height=300, title="Ouro • Top-10 (3-char)")
+            )
+            st.altair_chart(chart_o3, use_container_width=True)
+        except Exception:
+            st.dataframe(
+                pd.DataFrame(top10_3, columns=["Categoria (3-char)", "Contagem"]).sort_values("Contagem", ascending=False),
+                use_container_width=True
+            )
+
+    st.divider()
+
+    # ---- full code (só se existir no stats.json) ----
+    dist_full_ouro = stats.get("Distribuicao_full_ouro", {}) or stats.get("Distribuicao_full", {}) or {}
+    if dist_full_ouro:
+        paresF = sorted(dist_full_ouro.items(), key=lambda x: x[1], reverse=True)
+        totalF = sum(v for _, v in paresF) or 1
+        top10_F = paresF[:10]
+        top20_F = paresF[:20]
+
+        pct10_F = 100.0 * sum(v for _, v in top10_F) / totalF
+        pct20_F = 100.0 * sum(v for _, v in top20_F) / totalF
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Códigos full distintos (ouro)", f"{len(paresF)}")
+        c2.metric("%Top-10 (full)", f"{pct10_F:.1f}%")
+        c3.metric("%Top-20 (full)", f"{pct20_F:.1f}%")
+
+        try:
+            import altair as alt
+            df_topF = pd.DataFrame({"Código (full)": [k for k,_ in top10_F],
+                                    "Contagem": [v for _,v in top10_F]})
+            df_topF = df_topF.sort_values("Contagem", ascending=True)
+            chart_oF = (
+                alt.Chart(df_topF)
+                .mark_bar(color="#3B82F6")
+                .encode(
+                    x=alt.X("Contagem:Q"),
+                    y=alt.Y("Código (full):N", sort=None),
+                    tooltip=["Código (full)", "Contagem"]
+                )
+                .properties(height=300, title="Ouro • Top-10 (full)")
+            )
+            st.altair_chart(chart_oF, use_container_width=True)
+        except Exception:
+            st.dataframe(
+                pd.DataFrame(top10_F, columns=["Código (full)", "Contagem"]).sort_values("Contagem", ascending=False),
+                use_container_width=True
+            )
+    else:
+        st.info("Para cobertura **full** do ouro (%Top-10/%Top-20), inclua no stats.json uma chave "
+                "`Distribuicao_full_ouro` com o dicionário `{codigo_full: contagem}`.")
 
     st.divider()
 
@@ -464,8 +552,12 @@ with tabs[1]:
 
         st.divider()
 
-        # Top-10 distribuições
-        import altair as alt
+        # Top-10 distribuições por modelo (full e 3-char, se existirem)
+        try:
+            import altair as alt
+        except Exception:
+            alt = None
+
         top10_full  = cov_full.get("Top10", {}) or {}
         top10_3char = cov_3char.get("Top10", {}) or {}
 
@@ -473,31 +565,38 @@ with tabs[1]:
         if top10_full:
             df_f = pd.DataFrame({"Código (full)": list(top10_full.keys()), "Contagem": list(top10_full.values())})
             df_f = df_f.sort_values("Contagem", ascending=True)
-            chart_f = (
-                alt.Chart(df_f)
-                .mark_bar(color="#3B82F6")
-                .encode(
-                    x=alt.X("Contagem:Q"),
-                    y=alt.Y("Código (full):N", sort=None),
-                    tooltip=["Código (full)", "Contagem"]
+            if alt:
+                chart_f = (
+                    alt.Chart(df_f)
+                    .mark_bar(color="#3B82F6")
+                    .encode(
+                        x=alt.X("Contagem:Q"),
+                        y=alt.Y("Código (full):N", sort=None),
+                        tooltip=["Código (full)", "Contagem"]
+                    )
+                    .properties(height=320, title=f"Top-10 (full) — {choice}")
                 )
-                .properties(height=320, title=f"Top-10 (full) — {choice}")
-            )
-            colL.altair_chart(chart_f, use_container_width=True)
+                colL.altair_chart(chart_f, use_container_width=True)
+            else:
+                colL.dataframe(df_f.sort_values("Contagem", ascending=False), use_container_width=True)
+
         if top10_3char:
             df_c = pd.DataFrame({"Categoria (3-char)": list(top10_3char.keys()), "Contagem": list(top10_3char.values())})
             df_c = df_c.sort_values("Contagem", ascending=True)
-            chart_c = (
-                alt.Chart(df_c)
-                .mark_bar(color="#10B981")
-                .encode(
-                    x=alt.X("Contagem:Q"),
-                    y=alt.Y("Categoria (3-char):N", sort=None),
-                    tooltip=["Categoria (3-char)", "Contagem"]
+            if alt:
+                chart_c = (
+                    alt.Chart(df_c)
+                    .mark_bar(color="#10B981")
+                    .encode(
+                        x=alt.X("Contagem:Q"),
+                        y=alt.Y("Categoria (3-char):N", sort=None),
+                        tooltip=["Categoria (3-char)", "Contagem"]
+                    )
+                    .properties(height=320, title=f"Top-10 (3-char) — {choice}")
                 )
-                .properties(height=320, title=f"Top-10 (3-char) — {choice}")
-            )
-            colR.altair_chart(chart_c, use_container_width=True)
+                colR.altair_chart(chart_c, use_container_width=True)
+            else:
+                colR.dataframe(df_c.sort_values("Contagem", ascending=False), use_container_width=True)
 
         st.divider()
 
@@ -526,3 +625,4 @@ with tabs[1]:
             f"export={meta.get('data_export','?')} • "
             f"versões={meta.get('versoes',{})}"
         )
+

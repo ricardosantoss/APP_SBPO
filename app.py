@@ -20,18 +20,6 @@ COLOR_F1   = "#3B82F6"   # F1        (azul)
 PRIMARY    = "#0F3D7A"   # títulos e chips
 SECOND     = "#246BCE"
 
-# Ordem fixa de exibição (Dashboard)
-ORDER_MODELOS = [
-    "GPT-4o",
-    "Deep-Seek V-3",
-    "Sabia 3.1",
-    "Pluralidade",
-    "Borda",
-    "Gemini 1.5 Flash",
-    "GPT 4o-Mini",
-]
-HIGHLIGHT = {"Borda", "Pluralidade"}
-
 # ================== HELPERS ==================
 def _norm(s: str) -> str:
     """normaliza string (minúsculas, sem acento) para casar nomes/labels."""
@@ -253,7 +241,8 @@ with tabs[0]:
         })
         st.dataframe(df_show, use_container_width=True, hide_index=True)
 
-    # Prepara dados no formato tidy para gráfico (3 linhas por modelo)
+    # ================== GRÁFICO AGRUPADO ==================
+    # Prepara dados no formato tidy: 3 linhas por modelo
     plot_rows = []
     for _, r in view.iterrows():
         modelo = pretty_model_name(str(r["Modelo"]))
@@ -261,9 +250,33 @@ with tabs[0]:
         plot_rows.append({"Modelo": modelo, "Métrica": "Recall",   "Valor": float(r[metric_cols["recall"]])})
         plot_rows.append({"Modelo": modelo, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
     df_plot = pd.DataFrame(plot_rows)
+
+    # Desduplicação pós-pretty: mantém MAIOR valor por (Modelo, Métrica)
+    df_plot = (
+        df_plot
+        .groupby(["Modelo", "Métrica"], as_index=False, sort=False)["Valor"]
+        .max()
+    )
+
+    # Destacar agregados
+    HIGHLIGHT = {"Borda", "Pluralidade"}
     df_plot["Agregado"] = df_plot["Modelo"].isin(HIGHLIGHT)
 
-    # --- Gráfico: barras agrupadas (3 por modelo) com destaque nos agregados ---
+    # Domínio DINÂMICO no eixo X:
+    preferred = [
+        "GPT-4o",
+        "Deep-Seek V-3",
+        "Sabia 3.1",
+        "Pluralidade",
+        "Borda",
+        "Gemini 1.5 Flash",
+        "GPT 4o-Mini",
+    ]
+    present = [m for m in preferred if m in df_plot["Modelo"].unique().tolist()]
+    extras  = sorted([m for m in df_plot["Modelo"].unique().tolist() if m not in present])
+    order_domain = present + extras
+
+    # --- Barras agrupadas com destaque ---
     try:
         import altair as alt
 
@@ -276,13 +289,8 @@ with tabs[0]:
             .encode(
                 x=alt.X(
                     "Modelo:N",
-                    scale=alt.Scale(domain=ORDER_MODELOS),
-                    axis=alt.Axis(
-                        title=None,
-                        labelAngle=0,
-                        labelFontSize=14,   # nome do modelo maior
-                        labelColor="#222"
-                    )
+                    scale=alt.Scale(domain=order_domain),
+                    axis=alt.Axis(title=None, labelAngle=0, labelFontSize=14, labelColor="#222")
                 ),
                 y=alt.Y("Valor:Q", title=f"{agg_choice} (valor)"),
                 color=alt.Color(
@@ -293,7 +301,7 @@ with tabs[0]:
                     ),
                     legend=alt.Legend(title="Métrica")
                 ),
-                xOffset="Métrica:N",   # agrupa 3 barras por modelo
+                xOffset="Métrica:N",
                 opacity=alt.condition(alt.datum.Agregado == True, alt.value(1.0), alt.value(0.45)),
                 tooltip=["Modelo", "Métrica", alt.Tooltip("Valor:Q", format=".4f")]
             )
@@ -305,7 +313,7 @@ with tabs[0]:
             alt.Chart(df_plot[df_plot["Agregado"]])
             .mark_bar(stroke="#111", strokeWidth=2)
             .encode(
-                x=alt.X("Modelo:N", scale=alt.Scale(domain=ORDER_MODELOS), axis=alt.Axis(title=None)),
+                x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain), axis=alt.Axis(title=None)),
                 y=alt.Y("Valor:Q"),
                 color=alt.Color(
                     "Métrica:N",
@@ -324,7 +332,7 @@ with tabs[0]:
             alt.Chart(df_plot[(df_plot["Agregado"]) & (df_plot["Métrica"] == "F1")])
             .mark_text(dy=-8, fontSize=12, fontWeight="bold", color="#111")
             .encode(
-                x=alt.X("Modelo:N", scale=alt.Scale(domain=ORDER_MODELOS)),
+                x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain)),
                 y=alt.Y("Valor:Q"),
                 text=alt.Text("Valor:Q", format=".3f")
             )
@@ -335,7 +343,10 @@ with tabs[0]:
 
     except Exception:
         st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
-        st.dataframe(df_plot.pivot(index="Modelo", columns="Métrica", values="Valor"), use_container_width=True)
+        st.dataframe(
+            df_plot.pivot(index="Modelo", columns="Métrica", values="Valor").reindex(order_domain),
+            use_container_width=True
+        )
 
     # Δ vs. melhor modelo individual (pela F1 da agregação escolhida)
     info = best_individual_delta(view, metric_cols["f1"])

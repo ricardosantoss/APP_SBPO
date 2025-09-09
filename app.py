@@ -1,39 +1,45 @@
 # -*- coding: utf-8 -*-
-import json
 import os
+import re
+import json
 import unicodedata
 import pandas as pd
 import streamlit as st
 
-# ============== CONFIGURAÇÃO BÁSICA ==============
+# ================== CONFIG DA PÁGINA ==================
 st.set_page_config(
     page_title="CID-10 • Ensemble",
     page_icon="🧠",
     layout="wide"
 )
 
-PRIMARY = "#0F3D7A"   # Borda
-SECOND  = "#246BCE"   # Pluralidade
-GRAY    = "#B0B0B0"   # individuais (cinza claro)
-BG      = "#FFFFFF"
+# Paleta (cores por MÉTRICA, não por tipo de modelo)
+COLOR_PREC = "#5DA3F2"   # Precisão  (azul claro)
+COLOR_REC  = "#0F3D7A"   # Recall    (azul escuro)
+COLOR_F1   = "#246BCE"   # F1        (azul médio)
+PRIMARY    = "#0F3D7A"   # para títulos e chips
+SECOND     = "#246BCE"
 
-# ============== HELPERS ==============
+# ================== HELPERS ==================
+def _norm(s: str) -> str:
+    """normaliza string (minúsculas, sem acento) para casar nomes/labels."""
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode("ascii")
+    return s.lower().strip()
+
 @st.cache_data(show_spinner=False)
 def load_csv(path: str) -> pd.DataFrame:
     df = pd.read_csv(path)
-    # Normaliza nomes com hífen não separável e espaços estranhos, se houver
+    # normaliza algumas colunas comuns
     if "Modelo" in df.columns:
         df["Modelo"] = (
-            df["Modelo"]
-            .astype(str)
-            .str.replace("\u2011", "-", regex=False)
-            .str.replace("\u00A0", " ", regex=False)
+            df["Modelo"].astype(str)
+            .str.replace("\u2011", "-", regex=False)  # hífen não separável
+            .str.replace("\u00A0", " ", regex=False)  # espaço duro
             .str.strip()
         )
     if "Tipo" in df.columns:
         df["Tipo"] = df["Tipo"].astype(str).str.strip()
     if "k" in df.columns:
-        # Algumas vezes vem como float; garanta int
         try:
             df["k"] = df["k"].astype(int)
         except Exception:
@@ -45,63 +51,78 @@ def load_json(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def resolve_metric_columns(df: pd.DataFrame, agg_choice: str):
+    """
+    Encontra as colunas de Precisão/Recall/F1 para 'Micro' ou 'Macro',
+    mesmo com variações de nomes (port/inglês; com/sem acento).
+    Retorna: {'precision': <col>, 'recall': <col>, 'f1': <col>}
+    """
+    agg_norm = _norm(agg_choice)  # 'micro' ou 'macro'
+    cols = {"precision": None, "recall": None, "f1": None}
+
+    patterns = {
+        "precision": [rf"^{agg_norm}[_\s-]*prec(isao|ision|is|ao)?"],
+        "recall":    [rf"^{agg_norm}[_\s-]*(recall|sensibilidade)"],
+        "f1":        [rf"^{agg_norm}[_\s-]*f1"]
+    }
+
+    for c in df.columns:
+        cn = _norm(c)
+        for key, pats in patterns.items():
+            if cols[key] is None and any(re.match(p, cn) for p in pats):
+                cols[key] = c
+
+    # fallbacks canônicos
+    for key, canon in {
+        "precision": f"{agg_choice}_Precision",
+        "recall":    f"{agg_choice}_Recall",
+        "f1":        f"{agg_choice}_F1",
+    }.items():
+        if cols[key] is None and canon in df.columns:
+            cols[key] = canon
+
+    missing = [k for k, v in cols.items() if v is None]
+    if missing:
+        st.error(
+            f"Colunas de métricas não encontradas para {agg_choice}: faltando {missing}. "
+            f"Verifique nomes no resultados.csv (ex.: {agg_choice}_Precision, {agg_choice}_Recall, {agg_choice}_F1)."
+        )
+        st.stop()
+    return cols
+
 def is_aggregate(modelo: str) -> bool:
-    m = modelo.lower()
-    # Ajuste aqui se seus nomes tiverem outro padrão (ex.: "Agregado_Borda", "Borda", "Pluralidade")
-    return ("agregado" in m) or ("borda" in m) or ("pluralidade" in m)
+    """Identifica agregados de forma robusta (apenas se começar com 'Agregado_' ou contiver 'borda'/'plural')."""
+    m = _norm(modelo).replace("\u2011", "-")
+    return m.startswith("agregado_") or ("borda" in m) or ("plural" in m)
 
-def color_for_model(modelo: str) -> str:
+def best_individual_delta(df_slice: pd.DataFrame, f1_col: str):
     """
-    Define cor por tipo de modelo:
-    - Agregado_Borda → azul escuro
-    - Agregado_Pluralidade → azul médio
-    - Outros agregados → azul médio
-    - Individuais (API GPT, Maritalk, Gemini etc.) → cinza claro
+    Calcula Δ dos agregados vs melhor individual (pela F1 da agregação escolhida).
+    Retorna: (best_name, best_val, val_borda, val_plural, delta_borda, delta_plural)
     """
-    m = (
-        str(modelo)
-        .lower()
-        .replace("\u2011", "-")   # hífen não separável
-        .strip()
-    )
-
-    if m.startswith("agregado_borda"):
-        return PRIMARY
-    if m.startswith("agregado_plural"):
-        return SECOND
-    if m.startswith("agregado"):
-        return SECOND
-    return GRAY
-
-def best_individual_delta(df_slice: pd.DataFrame, metric_col: str = "Micro_F1"):
-    """Retorna (melhor_individual, valor_melhor, valor_borda, valor_plural, delta_borda, delta_plural)."""
-    # separa agregados vs individuais
+    if f1_col not in df_slice.columns:
+        return None
     ind = df_slice[~df_slice["Modelo"].apply(is_aggregate)].copy()
     agg = df_slice[df_slice["Modelo"].apply(is_aggregate)].copy()
     if ind.empty:
         return None
 
-    best_ind_row = ind.sort_values(metric_col, ascending=False).iloc[0]
-    best_name = best_ind_row["Modelo"]
-    best_val  = float(best_ind_row[metric_col])
+    best_row = ind.sort_values(f1_col, ascending=False).iloc[0]
+    best_name = str(best_row["Modelo"])
+    best_val  = float(best_row[f1_col])
 
-    # pega valores dos agregados, se existirem
     val_borda = None
     val_plural = None
     for _, r in agg.iterrows():
-        name = r["Modelo"].lower()
+        name = _norm(r["Modelo"])
         if "borda" in name:
-            val_borda = float(r[metric_col])
-        if ("plural" in name) or ("pluralidade" in name):
-            val_plural = float(r[metric_col])
+            val_borda = float(r[f1_col])
+        if "plural" in name:
+            val_plural = float(r[f1_col])
 
     delta_borda = (None if val_borda is None else (val_borda - best_val))
     delta_plural = (None if val_plural is None else (val_plural - best_val))
-
     return (best_name, best_val, val_borda, val_plural, delta_borda, delta_plural)
-
-def pct(x):
-    return f"{100.0*x:.2f}%"
 
 def style_title(txt: str):
     st.markdown(f"<h2 style='margin-top:0.25rem;color:{PRIMARY};'>{txt}</h2>", unsafe_allow_html=True)
@@ -109,18 +130,18 @@ def style_title(txt: str):
 def style_subtitle(txt: str):
     st.markdown(f"<h4 style='margin-top:0.25rem;color:#222;'>{txt}</h4>", unsafe_allow_html=True)
 
-def as_small_chip(label: str, value: str, color="#222", bg="#f4f6f8"):
+def chip(label: str, value: str, color="#fff", bg=PRIMARY):
     st.markdown(
         f"""
-        <div style="display:inline-block;margin:4px 8px 4px 0;padding:6px 10px;border-radius:999px;
-                    background:{bg};color:{color};font-weight:600;font-size:0.9rem;">
+        <div style="display:inline-block;margin:6px 10px 0 0;padding:8px 12px;border-radius:999px;
+                    background:{bg};color:{color};font-weight:600;font-size:0.95rem;">
             {label}: {value}
         </div>
         """,
         unsafe_allow_html=True
     )
 
-# ============== CARREGA DADOS (RESULTADOS + STATS) ==============
+# ================== CARREGA DADOS ==================
 DATA_DIR = "."
 
 csv_path  = os.path.join(DATA_DIR, "resultados.csv")
@@ -136,7 +157,7 @@ if not os.path.isfile(json_path):
 df = load_csv(csv_path)
 stats = load_json(json_path)
 
-# ============== HEADER ==============
+# ================== HEADER ==================
 st.markdown(
     f"""
     <div style="padding:8px 0 0 0">
@@ -150,80 +171,97 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ============== "BOTÕES" PRINCIPAIS ==============
-# Para uma UX estável em Streamlit, tabs dão menos fricção do que st.button para "páginas".
+# ================== ABAS ==================
 tabs = st.tabs(["🗂️ Dashboard", "📊 Estatísticas"])
 
-# ============== DASHBOARD ==============
+# ================== DASHBOARD ==================
 with tabs[0]:
     style_title("Dashboard")
 
-    # Filtros essenciais
+    # Filtros: Tipo, k e Agregação
     colA, colB, colC = st.columns([1,1,1], gap="medium")
     tipos = sorted(df["Tipo"].dropna().unique().tolist()) if "Tipo" in df.columns else ["Full"]
-    ks = sorted(df["k"].dropna().unique().tolist()) if "k" in df.columns else [3]
-    metrica_opts = ["Micro_F1", "Macro_F1"]
+    ks    = sorted(df["k"].dropna().unique().tolist()) if "k" in df.columns else [3]
     with colA:
         tipo = st.selectbox("Tipo", tipos, index=0)
     with colB:
         k = st.selectbox("k", ks, index=0)
     with colC:
-        metrica = st.selectbox("Métrica", metrica_opts, index=0)
+        agg_choice = st.radio("Agregação", ["Micro", "Macro"], index=0, horizontal=True)
 
-    # Filtra a visão para (Tipo, k)
+    # Filtra (Tipo, k)
     mask = (df["Tipo"].astype(str) == str(tipo)) & (df["k"] == int(k))
     view = df.loc[mask].copy()
     if view.empty:
         st.warning("Sem dados para esse filtro.")
         st.stop()
 
-    # Ordena por métrica
-    view = view.sort_values(metrica, ascending=False)
+    # Resolve nomes das colunas de métricas (para a agregação escolhida)
+    metric_cols = resolve_metric_columns(view, agg_choice)  # {'precision','recall','f1'}
 
-    # Tabela compacta opcional
+    # Ordena por F1 para ficar confortável
+    view = view.sort_values(metric_cols["f1"], ascending=False)
+
+    # Tabela (opcional)
     with st.expander("Ver tabela de resultados (ordenada)", expanded=False):
-        st.dataframe(
-            view[["Modelo", "Micro_F1", "Macro_F1", "TP", "FP", "FN"]],
-            use_container_width=True,
-            hide_index=True
-        )
+        cols_to_show = ["Modelo", metric_cols["precision"], metric_cols["recall"], metric_cols["f1"]]
+        for extra in ["TP","FP","FN"]:
+            if extra in view.columns:
+                cols_to_show.append(extra)
+        df_show = view[cols_to_show].rename(columns={
+            metric_cols["precision"]: f"{agg_choice}_Precisão",
+            metric_cols["recall"]:    f"{agg_choice}_Recall",
+            metric_cols["f1"]:        f"{agg_choice}_F1"
+        })
+        st.dataframe(df_show, use_container_width=True, hide_index=True)
 
-    # Cores por modelo
-    colors = [color_for_model(m) for m in view["Modelo"]]
-    # Render gráfico de barras com altair (leve e nativo)
+    # Prepara dados no formato tidy para gráfico (3 linhas por modelo)
+    plot_rows = []
+    for _, r in view.iterrows():
+        modelo = str(r["Modelo"])
+        plot_rows.append({"Modelo": modelo, "Métrica": "Precisão", "Valor": float(r[metric_cols["precision"]])})
+        plot_rows.append({"Modelo": modelo, "Métrica": "Recall",   "Valor": float(r[metric_cols["recall"]])})
+        plot_rows.append({"Modelo": modelo, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
+    df_plot = pd.DataFrame(plot_rows)
+
+    # Gráfico: small multiples (3 colunas) — cores por MÉTRICA
     try:
         import altair as alt
+
+        METRIC_COLORS = {"Precisão": COLOR_PREC, "Recall": COLOR_REC, "F1": COLOR_F1}
+
         chart = (
-            alt.Chart(view)
+            alt.Chart(df_plot)
             .mark_bar()
             .encode(
                 x=alt.X("Modelo:N", sort=None, axis=alt.Axis(labelAngle=-20, title=None)),
-                y=alt.Y(f"{metrica}:Q", title=metrica.replace("_", " ")),
-                color=alt.Color("Modelo:N",
-                                scale=alt.Scale(range=colors),
-                                legend=None),
-                tooltip=["Modelo", "Micro_F1", "Macro_F1", "TP", "FP", "FN"]
+                y=alt.Y("Valor:Q", title=f"{agg_choice} (valor)"),
+                color=alt.Color("Métrica:N",
+                                scale=alt.Scale(domain=list(METRIC_COLORS.keys()),
+                                                range=[METRIC_COLORS[m] for m in METRIC_COLORS]),
+                                legend=alt.Legend(title=None, orient="top")),
+                column=alt.Column("Métrica:N", spacing=8, header=alt.Header(title=None))
             )
             .properties(height=380)
+            .resolve_scale(y="independent")  # cada painel pode ter sua própria escala
         )
         st.altair_chart(chart, use_container_width=True)
     except Exception:
-        # Fallback de tabela colorida (se altair não estiver no requirements.txt)
         st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
-        st.dataframe(view, use_container_width=True)
+        st.dataframe(df_plot.pivot(index="Modelo", columns="Métrica", values="Valor"), use_container_width=True)
 
-    # Deltas vs melhor individual
-    info = best_individual_delta(view, metric_col=metrica)
+    # Δ vs. melhor modelo individual (pela F1 da agregação escolhida)
+    info = best_individual_delta(view, metric_cols["f1"])
     if info:
         best_name, best_val, val_borda, val_plural, d_borda, d_plural = info
         style_subtitle("Δ vs. melhor modelo individual")
-        as_small_chip("Melhor Individual", f"{best_name} ({best_val:.4f})", color="#fff", bg=PRIMARY)
+        chip("Melhor Individual", f"{best_name} ({best_val:.4f})", bg=PRIMARY)
         if val_borda is not None:
-            as_small_chip("Borda", f"{val_borda:.4f} ({'+' if d_borda>=0 else ''}{d_borda:.4f})", color="#fff", bg=PRIMARY)
+            chip("Borda", f"{val_borda:.4f} ({'+' if d_borda>=0 else ''}{d_borda:.4f})", bg=PRIMARY)
         if val_plural is not None:
-            as_small_chip("Pluralidade", f"{val_plural:.4f} ({'+' if d_plural>=0 else ''}{d_plural:.4f})", color="#fff", bg=SECOND)
+            chip("Pluralidade", f"{val_plural:.4f} ({'+' if d_plural>=0 else ''}{d_plural:.4f})", bg=SECOND)
 
-# ============== ESTATÍSTICAS ==============
+# ================== ESTATÍSTICAS ==================
 with tabs[1]:
     style_title("Estatísticas")
 
@@ -238,7 +276,7 @@ with tabs[1]:
 
     st.divider()
 
-    # — Distribuição Top-10 3-char do ouro (se existir)
+    # — Top-10 3-char do ouro (se existir)
     dist3 = stats.get("Distribuicao_3char", {})
     if dist3:
         style_subtitle("Top-10 categorias 3-char do ouro")
@@ -249,7 +287,7 @@ with tabs[1]:
             import altair as alt
             chart2 = (
                 alt.Chart(df_top)
-                .mark_bar(color=PRIMARY)
+                .mark_bar(color=SECOND)
                 .encode(
                     x=alt.X("Contagem:Q"),
                     y=alt.Y("Categoria:N", sort=None),
@@ -263,7 +301,7 @@ with tabs[1]:
 
     st.divider()
 
-    # — Estatísticas por modelo (médias, etc.)
+    # — Estatísticas por modelo (se você enriqueceu o stats.json)
     pred_por_modelo = stats.get("Predicoes_por_modelo", {})
     if pred_por_modelo:
         style_subtitle("Predições por modelo (estatísticas)")
@@ -287,36 +325,6 @@ with tabs[1]:
             })
         df_stats_modelo = pd.DataFrame(rows).sort_values("Modelo")
         st.dataframe(df_stats_modelo, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # — Cobertura agregada (se você adicionou no stats.json)
-    cobertura = stats.get("Cobertura", {})
-    if cobertura:
-        style_subtitle("Cobertura (ouro)")
-        c1, c2 = st.columns(2)
-        c1.metric("Códigos folha distintos", f"{cobertura.get('Codigos_folha_distintos', 0)}")
-        c2.metric("Categorias 3-char distintas", f"{cobertura.get('Categorias_3char_distintas', 0)}")
-
-        top10 = cobertura.get("Top_10_categorias", {})
-        if top10:
-            df_cov = pd.DataFrame({"Categoria": list(top10.keys()), "Contagem": list(top10.values())})
-            df_cov = df_cov.sort_values("Contagem", ascending=True)
-            try:
-                import altair as alt
-                chart3 = (
-                    alt.Chart(df_cov)
-                    .mark_bar(color=SECOND)
-                    .encode(
-                        x=alt.X("Contagem:Q"),
-                        y=alt.Y("Categoria:N", sort=None),
-                        tooltip=["Categoria", "Contagem"]
-                    )
-                    .properties(height=320)
-                )
-                st.altair_chart(chart3, use_container_width=True)
-            except Exception:
-                st.dataframe(df_cov.sort_values("Contagem", ascending=False), use_container_width=True)
 
     # — Rodapé/meta (se existir)
     meta = stats.get("meta", {})

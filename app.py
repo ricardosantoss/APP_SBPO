@@ -185,10 +185,24 @@ stats = load_json(json_path)
 st.markdown(
     f"""
     <div style="padding:8px 0 0 0">
-        <h1 style="margin:0;color:{PRIMARY};">AGREGAÇÃO DE PREDIÇÕES DE GRANDES MODELOS DE LINGUAGEM VIA MÉTODOS DE DECISÃO EM GRUPO PARA A CODIFICAÇÃO AUTOMÁTICA DE DIAGNÓSTICOS CLÍNICOS</h1>
-        <p style="margin:4px 0 0 0;color:#333;">
+        <h1 style="margin:0;color:{PRIMARY};">
+            Agregação de predições de grandes modelos de linguagem via métodos de decisão em grupo para a codificação automática de diagnósticos clínicos
+        </h1>
+        <p style="margin:8px 0 0 0;color:#333;font-size:16px;">
+            Ricardo da Silva Santos<sup>1</sup><br>
+            Murilo Gleyson Gazzola<sup>2</sup><br>
+            Renato Teixeira Souza<sup>3</sup><br>
+            Rodolfo de Carvalho Pacagnella<sup>3</sup><br>
+            Cristiano Torezan<sup>4</sup>
+        </p>
+        <p style="margin:4px 0 0 0;color:#555;font-size:14px;">
+            <sup>1</sup> Universidade Estadual de Campinas (UNICAMP)<br>
+            <sup>2</sup> Universidade Presbiteriana Mackenzie<br>
+            <sup>3</sup> Universidade Estadual de Campinas - UNICAMP<br>
+            <sup>4</sup> Universidade Estadual de Campinas - UNICAMP
+        </p>
+        <p style="margin:12px 0 0 0;color:#333;">
             Comparação de modelos individuais vs. agregação (Pluralidade / Borda) para codificação CID-10.
-            App offline com dados pré-computados.
         </p>
     </div>
     """,

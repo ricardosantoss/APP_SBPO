@@ -835,7 +835,7 @@ with tabs[2]:
             # badge (apenas se houver anotação)
             badge_html = ""
             if annotations is not None and cn in annotations:
-                badge_html = f"<span class='badge'>{annotations[cn]}</span>"
+                badge_html = f"<span class='badge'>{annotations[cn]}{' pts' if ann_suffix=='pts' else ' v'}</span>"
             chips.append(f"<span class='{' '.join(cls)}'>{code}{badge_html}</span>")
         st.markdown(f"**{name}**", unsafe_allow_html=True)
         st.markdown(" ".join(chips) if chips else "—", unsafe_allow_html=True)

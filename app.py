@@ -50,6 +50,23 @@ pwa_code = """
 """
 st.markdown(pwa_code, unsafe_allow_html=True)
 
+# ESTILOS CSS PARA UMA APARÊNCIA MAIS NATIVA
+css_tablet_style = """
+<style>
+    /* Esconde o menu hamburger e o rodapé "Made with Streamlit" */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Melhora o espaçamento e o tamanho dos filtros para toque */
+    .stRadio > div, .stSelectbox > div {
+        padding: 0.5rem 0;
+    }
+</style>
+"""
+st.markdown(css_tablet_style, unsafe_allow_html=True)
+
+
 # Paleta (cores bem distintas por MÉTRICA)
 # Paleta (cores VIVAS e bem distintas por MÉTRICA)
 COLOR_PREC = "#F97316"    # Precisão   (Laranja Vibrante)

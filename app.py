@@ -632,252 +632,141 @@ with tabs[1]:
 with tabs[2]:
     style_title("Exemplos")
 
-    # --------- carregar examples.json ---------
-    EXAMPLES_PATH = os.path.join(DATA_DIR, "examples.json")
-    try:
-        EXAMPLES = load_json(EXAMPLES_PATH) if os.path.isfile(EXAMPLES_PATH) else []
-        if isinstance(EXAMPLES, dict):
-            EXAMPLES = [EXAMPLES]
-    except Exception:
-        EXAMPLES = []
+    examples_path = os.path.join(DATA_DIR, "examples.json")
+    if not os.path.isfile(examples_path):
+        st.info("Adicione um arquivo `examples.json` para visualizar exemplos de predição.")
+    else:
+        examples = load_json(examples_path)
 
-    if not EXAMPLES:
-        st.info("Adicione um arquivo examples.json na pasta do app para visualizar casos.")
-        st.stop()
+        # seletor de caso
+        ids = [ex.get("id", f"case-{i+1}") for i, ex in enumerate(examples)]
+        case_choice = st.selectbox("Escolha o caso", ids, index=0)
+        ex = examples[ids.index(case_choice)]
 
-    # --------- helpers ---------
-    def _case_label(e, i):
-        cid = e.get("id", f"case-{i+1}")
-        kk  = e.get("k", "?")
-        gg  = e.get("gold") or []
-        if not isinstance(gg, (list, tuple)):
-            gg = []
-        gg_txt = ", ".join(map(str, gg)) if gg else "—"
-        return f"{cid} — k={kk} — gold={gg_txt}"
+        # seletor de k
+        k_sel = int(ex.get("k", 5))
+        k_sel = st.slider("Selecione k", min_value=1, max_value=10, value=k_sel, step=1)
 
-    def _safe_int(x, default=5):
-        try:
-            return int(x)
-        except Exception:
-            return default
+        gold = ex.get("gold", [])
+        gold_norm = set(_norm(c) for c in gold)
 
-    def _as_list(x):
-        if isinstance(x, (list, tuple)):
-            return [str(v) for v in x]
-        if x is None:
-            return []
-        return [str(x)]
+        models = ex.get("models", {})
 
-    def normalize_code(c: str) -> str:
-        return str(c).strip().upper()
+        # renderizador
+        def render_pred_list(label, preds, k, gold_norm, annotations=None, ann_suffix=""):
+            chips = []
+            for i, code in enumerate(preds):
+                code_norm = _norm(code)
+                topk = (i < k)
+                in_gold = code_norm in gold_norm
+                color = "#444"
+                bg = "#eee"
+                if topk:
+                    bg = "#d1e7ff"
+                if in_gold:
+                    bg = "#bbf7d0"
+                ann_txt = ""
+                if annotations and code in annotations:
+                    ann_txt = f"<span class='badge'>{annotations[code]}{ann_suffix}</span>"
+                chips.append(
+                    f"<div class='chip' style='background:{bg};color:{color};'>"
+                    f"{code}{ann_txt}</div>"
+                )
+            st.markdown(
+                f"<div style='margin:6px 0;'><b>{label}:</b> "
+                + " ".join(chips)
+                + "</div>",
+                unsafe_allow_html=True,
+            )
 
-    def unique_preserve(seq):
-        seen = set()
-        out = []
-        for x in seq:
-            xn = normalize_code(x)
-            if xn not in seen:
-                seen.add(xn)
-                out.append(x)
-        return out
+        # função agregados
+        def compute_plurality_and_borda(models_dict, k):
+            from collections import Counter, defaultdict
+            votes_all = Counter()
+            votes_k = Counter()
+            scores_all = defaultdict(int)
+            scores_k = defaultdict(int)
 
-    # Pluralidade e Borda calculados em tempo real
-    from collections import defaultdict, Counter
+            for preds in models_dict.values():
+                for pos, code in enumerate(preds):
+                    votes_all[code] += 1
+                    scores_all[code] += (len(preds) - pos)
+                for pos, code in enumerate(preds[:k]):
+                    votes_k[code] += 1
+                    scores_k[code] += (k - pos)
 
-    def compute_plurality_and_borda(models_lists: dict, k: int):
-        """
-        models_lists: dict nome_modelo -> lista de códigos (ordem = ranking do modelo)
-        k: considerar apenas pos < k para votar/pontuar
-        Retorna:
-          - plural_rank: lista [(code_norm, freq_k, freq_all, avg_rank)]
-          - borda_rank:  lista [(code_norm, score_k, score_all, avg_rank)]
-          - display_map: dict code_norm -> label para exibição (usa forma mais comum)
-        """
-        # mapa "forma de exibição" mais comum
-        form_counter = defaultdict(Counter)
+            # pluralidade
+            plural_rank = []
+            for code in set(votes_all.keys()) | set(votes_k.keys()):
+                plural_rank.append((code, votes_k[code], votes_all[code], scores_all[code]))
+            plural_rank.sort(key=lambda x: (-x[1], x[0]))
 
-        # pluralidade
-        freq_all = Counter()
-        freq_k   = Counter()
+            # borda
+            borda_rank = []
+            for code in set(scores_all.keys()) | set(scores_k.keys()):
+                borda_rank.append((code, scores_k[code], votes_all[code], scores_all[code]))
+            borda_rank.sort(key=lambda x: (-x[1], x[0]))
 
-        # borda
-        score_all = defaultdict(int)
-        score_k   = defaultdict(int)
+            return plural_rank, borda_rank
 
-        # estatística auxiliar: ranks para avg_rank
-        rank_sum = defaultdict(float)
-        rank_cnt = defaultdict(int)
+        # estilos
+        st.markdown("""
+        <style>
+        .chip {
+            display:inline-block;
+            margin:2px;
+            padding:6px 10px;
+            border-radius:999px;
+            font-size:0.9rem;
+            font-weight:500;
+        }
+        .badge {
+            background:#111;
+            color:#fff;
+            padding:2px 6px;
+            border-radius:8px;
+            margin-left:4px;
+            font-size:0.75rem;
+        }
+        .legend {font-size:0.85rem;color:#555;margin-top:0.5rem;}
+        </style>
+        """, unsafe_allow_html=True)
 
-        for mdl, raw_list in models_lists.items():
-            lst = unique_preserve(_as_list(raw_list))
-            for pos, code in enumerate(lst):
-                cn = normalize_code(code)
-                form_counter[cn][code] += 1
-
-                # pluralidade total
-                freq_all[cn] += 1
-                # borda total (peso decrescente por posição)
-                score_all[cn] += max(0, len(lst) - pos)
-
-                # média de posição
-                rank_sum[cn] += (pos + 1)
-                rank_cnt[cn] += 1
-
-                # versões @k
-                if pos < k:
-                    freq_k[cn]  += 1
-                    score_k[cn] += (k - pos)
-
-        # forma de exibição preferida
-        display_map = {cn: ctr.most_common(1)[0][0] for cn, ctr in form_counter.items()}
-
-        # ordenações
-        def to_plural_list():
-            items = []
-            for cn in set(list(freq_all.keys()) + list(freq_k.keys())):
-                avg_rank = (rank_sum[cn] / rank_cnt[cn]) if rank_cnt[cn] else 9999
-                items.append((cn, freq_k[cn], freq_all[cn], avg_rank))
-            items.sort(key=lambda t: (-t[1], -t[2], t[3], t[0]))
-            return items
-
-        def to_borda_list():
-            items = []
-            for cn in set(list(score_all.keys()) + list(score_k.keys())):
-                avg_rank = (rank_sum[cn] / rank_cnt[cn]) if rank_cnt[cn] else 9999
-                items.append((cn, score_k[cn], score_all[cn], avg_rank))
-            items.sort(key=lambda t: (-t[1], -t[2], t[3], t[0]))
-            return items
-
-        return to_plural_list(), to_borda_list(), display_map
-
-    # --------- seletor do caso ---------
-    case_labels = [_case_label(e, i) for i, e in enumerate(EXAMPLES)]
-    case_idx = st.selectbox("Caso", options=list(range(len(EXAMPLES))),
-                            format_func=lambda i: case_labels[i], index=0)
-
-    ex = EXAMPLES[case_idx] if (0 <= case_idx < len(EXAMPLES) and isinstance(EXAMPLES[case_idx], dict)) else {}
-
-    # --------- parâmetros do caso ---------
-    k_default = _safe_int(ex.get("k"), 5)
-    gold_raw  = _as_list(ex.get("gold"))
-    gold_norm = set(normalize_code(c) for c in gold_raw)
-    texto     = ex.get("texto", "")
-
-    k_sel = st.number_input("k (top-k considerado por modelo e pelos agregados)", min_value=1, max_value=30, value=k_default, step=1)
-
-    if texto:
-        with st.expander("Texto do caso"):
-            st.write(texto)
-
-    # --------- modelos do caso ---------
-    models_dict = ex.get("models", {}) or {}
-    if not models_dict:
-        st.warning("Nenhum modelo encontrado neste exemplo.")
-        st.stop()
-
-    # Limpeza de chaves "não-modelo"
-    def is_noise_key(raw_name: str) -> bool:
-        n = _norm(raw_name)
-        return (
-            "_3char" in n or " 3char" in n or
-            n.startswith("21.") or "cid de alta" in n or "cid_de_alta" in n or
-            "evolucao" in n or "evolução" in raw_name.lower()
+        st.markdown(
+            "<div class='legend'>Legenda: "
+            "<span class='chip' style='background:#d1e7ff;'>Top-k</span> "
+            "<span class='chip' style='background:#eee;'>Fora do k</span> "
+            "<span class='chip' style='background:#bbf7d0;'>Acerto (no ouro)</span> "
+            "<span class='badge'>nº</span> votos/pontos <b>totais (lista completa)</b>; ranking ordenado por @k</div>",
+            unsafe_allow_html=True
         )
 
-    # Normaliza nomes de modelos para exibição
-    clean_models = {}
-    for raw_name, preds in models_dict.items():
-        if is_noise_key(raw_name):
-            continue
-        pretty = pretty_model_name(raw_name)
-        clean_models[pretty] = _as_list(preds)
+        # ouro
+        render_pred_list("CID Ouro", gold, k_sel, gold_norm)
 
-    # ======= Cálculo online de Pluralidade e Borda (@k) =======
-    plural_rank, borda_rank, display_map = compute_plurality_and_borda(clean_models, k=k_sel)
+        # individuais
+        for model_name, preds in models.items():
+            if model_name in {"Borda", "Pluralidade"}:
+                continue
+            render_pred_list(pretty_model_name(model_name), preds, k_sel, gold_norm)
 
-    # ======= CSS para chips =======
-    st.markdown("""
-    <style>
-    .chip {display:inline-block;margin:2px 6px 2px 0;padding:6px 10px;border-radius:999px;
-           font-weight:600;border:1px solid #e5e7eb;color:#111;background:#F9FAFB;}
-    .ink   {background:#E5E7EB;}                              /* cinza fora do top-k */
-    .topk  {background:#DBEAFE;border-color:#93C5FD;}         /* azul claro top-k */
-    .hit   {box-shadow:0 0 0 2px #10B981 inset;}              /* contorno verde (ouro) */
-    .badge {display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;
-            font-weight:700;font-size:0.78rem;color:#111;background:#fde68a;border:1px solid #f59e0b;}
-    .legend {font-size:0.9rem;color:#444}
-    </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown(
-        "<div class='legend'>Legenda: <span class='chip topk'>Top-k</span> "
-        "<span class='chip ink'>Fora do k</span> "
-        "<span class='chip hit'>Acerto (no ouro)</span> "
-        "<span class='badge'>nº</span> valor do código (votos/pts) no agregado</div>",
-        unsafe_allow_html=True
-    )
-
-    # ======= Render helper =======
-    def render_pred_list(name, ordered_codes, k, gold_norm, annotations=None, ann_suffix=""):
-        """
-        Mostra TODOS os códigos, destacando os k primeiros e acertos.
-        annotations: dict[str_normalizada] -> número a exibir no badge
-        ann_suffix:  rótulo curto (ex.: 'v' p/ votos, 'pts' p/ pontos) — só para caption abaixo
-        """
-        uniq = unique_preserve(ordered_codes)
-        chips = []
-        for i, code in enumerate(uniq):
-            cn = normalize_code(code)
-            cls = ["chip"]
-            if i < k: cls.append("topk")
-            else:     cls.append("ink")
-            if cn in gold_norm: cls.append("hit")
-            # badge (apenas se houver anotação)
-            badge_html = ""
-            if annotations is not None and cn in annotations:
-                badge_html = f"<span class='badge'>{annotations[cn]}{' pts' if ann_suffix=='pts' else ' v'}</span>"
-            chips.append(f"<span class='{' '.join(cls)}'>{code}{badge_html}</span>")
-        st.markdown(f"**{name}**", unsafe_allow_html=True)
-        st.markdown(" ".join(chips) if chips else "—", unsafe_allow_html=True)
-
-    colL, colR = st.columns(2)
-
-    # ======= ESQUERDA: todos os modelos individuais =======
-    with colL:
-        style_subtitle("Modelos (todos os códigos, com top-k destacado)")
-        if not clean_models:
-            st.info("Sem modelos individuais neste caso.")
-        else:
-            for mdl_name in sorted(clean_models.keys()):
-                render_pred_list(mdl_name, clean_models[mdl_name], k_sel, gold_norm)
-
-    # ======= DIREITA: agregados calculados em tempo real =======
-    with colR:
-        style_subtitle("Agregados (calculados agora)")
-
-        # --- Pluralidade ---
-        # ranking por freq_k desc → freq_all desc → avg_rank asc
-        plural_codes_ordered = [display_map[cn] for (cn, _, _, _) in plural_rank]
-        # mapa de votos @k por código normalizado
-        plural_votes_map = {cn: frk for (cn, frk, _, _) in plural_rank}
-        render_pred_list("Pluralidade (freq @k)", plural_codes_ordered, k_sel, gold_norm,
-                         annotations=plural_votes_map, ann_suffix="v")
+        # agregados
+        plural_rank, borda_rank = compute_plurality_and_borda(models, k_sel)
+        display_map = {c: c for c in set([c for preds in models.values() for c in preds])}
 
         if plural_rank:
-            total_votos_k = sum(frk for _, frk, _, _ in plural_rank)
-            st.caption(f"Pluralidade @k: soma total de votos nos top-k dos modelos = {total_votos_k}")
-
-        st.divider()
-
-        # --- Borda ---
-        # ranking por score_k desc → score_all desc → avg_rank asc
-        borda_codes_ordered = [display_map[cn] for (cn, _, _, _) in borda_rank]
-        # mapa de pontos @k por código normalizado
-        borda_points_map = {cn: sc for (cn, sc, _, _) in borda_rank}
-        render_pred_list("Borda (pontuação @k)", borda_codes_ordered, k_sel, gold_norm,
-                         annotations=borda_points_map, ann_suffix="pts")
+            plural_codes_ordered = [display_map[cn] for (cn, _, _, _) in plural_rank]
+            plural_votes_full_map = {cn: fr_all for (cn, _, fr_all, _) in plural_rank}
+            render_pred_list("Pluralidade (ranking @k; badge=votos totais)", plural_codes_ordered, k_sel, gold_norm,
+                             annotations=plural_votes_full_map, ann_suffix="v")
+            total_votos_full = sum(fr_all for _, _, fr_all, _ in plural_rank)
+            st.caption(f"Pluralidade: soma total de votos (lista completa) = {total_votos_full}")
 
         if borda_rank:
-            total_pontos_k = sum(sc for _, sc, _, _ in borda_rank)
-            st.caption(f"Borda @k: soma total de pontos nos top-k dos modelos = {total_pontos_k}")
+            borda_codes_ordered = [display_map[cn] for (cn, _, _, _) in borda_rank]
+            borda_points_full_map = {cn: sc_all for (cn, _, sc_all, _) in borda_rank}
+            render_pred_list("Borda (ranking @k; badge=pontos totais)", borda_codes_ordered, k_sel, gold_norm,
+                             annotations=borda_points_full_map, ann_suffix="pts")
+            total_pontos_full = sum(sc_all for _, _, sc_all, _ in borda_rank)
+            st.caption(f"Borda: soma total de pontos (lista completa) = {total_pontos_full}")
 

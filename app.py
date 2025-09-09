@@ -860,7 +860,6 @@ with tabs[2]:
         if plural_rank:
             topk_set = set(normalize_code(display_map[cn]) for cn, _, _, _ in plural_rank[:k_sel])
             total_votos_k = sum(frk for _, frk, _, _ in plural_rank)
-            st.caption(f"Pluralidade @k: soma de votos nos top-k dos modelos = {total_votos_k}")
 
         st.divider()
 
@@ -871,4 +870,4 @@ with tabs[2]:
 
         if borda_rank:
             total_pontos_k = sum(sc for _, sc, _, _ in borda_rank)
-            st.caption(f"Borda @k: soma de pontos nos top-k dos modelos = {total_pontos_k}")
+            

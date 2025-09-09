@@ -412,7 +412,110 @@ with tabs[1]:
             })
         df_stats_modelo = pd.DataFrame(rows).sort_values("Modelo")
         st.dataframe(df_stats_modelo, use_container_width=True, hide_index=True)
+cobertura_pm = stats.get("Cobertura_por_modelo", {})
+    if not cobertura_pm:
+        st.info("Para ver cobertura por modelo (full e 3-char, %Top10 e %Top20), gere 'Cobertura_por_modelo' no stats.json.")
+    else:
+        style_subtitle("Cobertura por modelo (full e 3-char)")
 
+        # Mapear chaves do JSON -> nomes bonitos
+        items = []
+        for raw_name, d in cobertura_pm.items():
+            pretty = pretty_model_name(raw_name)
+            items.append((pretty, raw_name))
+        # ordenar alfabeticamente pelos nomes bonitos
+        items = sorted(items, key=lambda x: x[0])
+
+        col_sel, _ = st.columns([2,1])
+        with col_sel:
+            pretty_names = [p for p, _ in items]
+            choice = st.selectbox("Modelo", pretty_names, index=0)
+
+        # recuperar o dicionário do modelo escolhido
+        raw_key = dict(items)[choice]
+        d = cobertura_pm.get(raw_key, {})
+
+        # Extrair métricas com defaults seguros
+        n_leaf = int(d.get("Codigos_folha_distintos", 0))
+        n_3ch  = int(d.get("Categorias_3char_distintas", 0))
+
+        cov_full   = d.get("Cobertura_full", {}) or {}
+        cov_3char  = d.get("Cobertura_3char", {}) or {}
+
+        pct10_full = float(cov_full.get("%Top10", 0.0))
+        pct20_full = float(cov_full.get("%Top20", 0.0))
+        pct10_3ch  = float(cov_3char.get("%Top10", 0.0))
+        pct20_3ch  = float(cov_3char.get("%Top20", 0.0))
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Únicos preditos (full)", f"{n_leaf}")
+        c2.metric("Únicos preditos (3-char)", f"{n_3ch}")
+        c3.metric("%Top-10 (full)", f"{pct10_full:.1f}%")
+        c4.metric("%Top-20 (full)", f"{pct20_full:.1f}%")
+
+        c5, c6 = st.columns(2)
+        with c5:
+            st.metric("%Top-10 (3-char)", f"{pct10_3ch:.1f}%")
+        with c6:
+            st.metric("%Top-20 (3-char)", f"{pct20_3ch:.1f}%")
+
+        st.caption("“%Top-10/20” = fração das predições coberta pelos 10/20 códigos mais frequentes.")
+
+        st.divider()
+
+        # (Opcional) Mostrar Top-10 como barras para inspeção rápida
+        import altair as alt
+        top10_full  = cov_full.get("Top10", {}) or cov_full.get("Top_10", {}) or cov_full.get("Top-10", {}) or cov_full.get("Top10", {})
+        top10_3char = cov_3char.get("Top10", {}) or cov_3char.get("Top_10", {}) or cov_3char.get("Top-10", {}) or cov_3char.get("Top10", {})
+
+        colL, colR = st.columns(2)
+        if top10_full:
+            df_f = pd.DataFrame({"Código (full)": list(top10_full.keys()), "Contagem": list(top10_full.values())})
+            df_f = df_f.sort_values("Contagem", ascending=True)
+            chart_f = (
+                alt.Chart(df_f)
+                .mark_bar(color="#3B82F6")
+                .encode(
+                    x=alt.X("Contagem:Q"),
+                    y=alt.Y("Código (full):N", sort=None),
+                    tooltip=["Código (full)", "Contagem"]
+                )
+                .properties(height=320, title=f"Top-10 (full) — {choice}")
+            )
+            colL.altair_chart(chart_f, use_container_width=True)
+        if top10_3char:
+            df_c = pd.DataFrame({"Categoria (3-char)": list(top10_3char.keys()), "Contagem": list(top10_3char.values())})
+            df_c = df_c.sort_values("Contagem", ascending=True)
+            chart_c = (
+                alt.Chart(df_c)
+                .mark_bar(color="#10B981")
+                .encode(
+                    x=alt.X("Contagem:Q"),
+                    y=alt.Y("Categoria (3-char):N", sort=None),
+                    tooltip=["Categoria (3-char)", "Contagem"]
+                )
+                .properties(height=320, title=f"Top-10 (3-char) — {choice}")
+            )
+            colR.altair_chart(chart_c, use_container_width=True)
+
+        st.divider()
+
+        # Tabela-resumo com TODOS os modelos (para comparar lado a lado)
+        rows = []
+        for raw_name, dmodel in cobertura_pm.items():
+            pretty = pretty_model_name(raw_name)
+            r = {
+                "Modelo": pretty,
+                "Únicos (full)": int(dmodel.get("Codigos_folha_distintos", 0)),
+                "Únicos (3-char)": int(dmodel.get("Categorias_3char_distintas", 0)),
+                "%Top-10 (full)": float((dmodel.get("Cobertura_full", {}) or {}).get("%Top10", 0.0)),
+                "%Top-20 (full)": float((dmodel.get("Cobertura_full", {}) or {}).get("%Top20", 0.0)),
+                "%Top-10 (3-char)": float((dmodel.get("Cobertura_3char", {}) or {}).get("%Top10", 0.0)),
+                "%Top-20 (3-char)": float((dmodel.get("Cobertura_3char", {}) or {}).get("%Top20", 0.0)),
+            }
+            rows.append(r)
+        df_resumo = pd.DataFrame(rows).sort_values("Modelo")
+        st.dataframe(df_resumo, use_container_width=True, hide_index=True)
     # — Rodapé/meta (se existir)
     meta = stats.get("meta", {})
     if meta:

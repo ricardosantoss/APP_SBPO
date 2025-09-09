@@ -631,170 +631,90 @@ with tabs[1]:
 with tabs[2]:
     style_title("Exemplos")
 
-    # --- loader bem contido (não mexe no resto do app) ---
-    @st.cache_data(show_spinner=False)
-    def _load_examples(path: str = "examples.json"):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    return data
-                return []
-        except Exception:
-            return []
+    # --------- carregar examples.json ---------
+    EXAMPLES_PATH = os.path.join(DATA_DIR, "examples.json")
+    try:
+        EXAMPLES = load_json(EXAMPLES_PATH) if os.path.isfile(EXAMPLES_PATH) else []
+        if isinstance(EXAMPLES, dict):
+            EXAMPLES = [EXAMPLES]
+    except Exception:
+        EXAMPLES = []
 
-    examples = _load_examples()
-
-    if not examples:
-        st.info("Coloque um **examples.json** na mesma pasta do app para habilitar esta aba.")
+    if not EXAMPLES:
+        st.info("Adicione um arquivo examples.json na pasta do app para visualizar casos.")
         st.stop()
 
-    # seleção do caso
-    ids = [ex.get("id", f"case-{i+1:03d}") for i, ex in enumerate(examples)]
-    col_sel, col_k = st.columns([2, 1])
-    with col_sel:
-        case_id = st.selectbox("Caso", ids, index=0)
+    # --------- helpers ---------
+    def _case_label(e, i):
+        cid = e.get("id", f"case-{i+1}")
+        kk  = e.get("k", "?")
+        gg  = e.get("gold") or []
+        if not isinstance(gg, (list, tuple)):
+            gg = []
+        gg_txt = ", ".join(map(str, gg)) if gg else "—"
+        return f"{cid} — k={kk} — gold={gg_txt}"
 
-    # pega o exemplo escolhido
-    ex = next((e for e in examples if e.get("id") == case_id), examples[0])
+    def _safe_int(x, default=5):
+        try:
+            return int(x)
+        except Exception:
+            return default
 
-    # gold (sempre mostra)
-    gold = ex.get("gold", []) or []
-    tipo_ex = ex.get("tipo", "").strip() or "—"
+    def _as_list(x):
+        return x if isinstance(x, (list, tuple)) else []
 
-    st.caption(f"Tipo do caso: **{tipo_ex}**")
-    st.markdown("**Gold (3-char ou full, conforme o caso):**")
-    def _render_tags(codes, border="#E5E7EB", bg="#F9FAFB", fg="#111827"):
-        if not codes: 
-            st.write("—")
-            return
-        chips = "".join(
-            f"<span style='display:inline-block;margin:4px 6px 0 0;padding:6px 10px;"
-            f"border:1px solid {border};background:{bg};color:{fg};border-radius:999px;"
-            f"font-weight:600;font-size:0.9rem;'>{str(c).strip()}</span>"
-            for c in codes
-        )
-        st.markdown(f"<div>{chips}</div>", unsafe_allow_html=True)
+    # --------- seletor do caso ---------
+    case_labels = [_case_label(e, i) for i, e in enumerate(EXAMPLES)]
+    case_idx = st.selectbox("Caso", options=list(range(len(EXAMPLES))),
+                            format_func=lambda i: case_labels[i], index=0)
 
-    _render_tags(gold, border="#D1FAE5", bg="#ECFDF5", fg="#065F46")
-    st.divider()
+    ex = EXAMPLES[case_idx] if (0 <= case_idx < len(EXAMPLES) and isinstance(EXAMPLES[case_idx], dict)) else {}
 
-    # mapeia nomes bonitos sem alterar seu pretty_model_name global
-    def _nice(raw: str) -> str:
-        m = _norm(raw)
-        if "borda" in m: return "Borda"
-        if "plural" in m: return "Pluralidade"
-        if "gemini" in m: return "Gemini 1.5 Flash"
-        if "deep" in m and "seek" in m: return "Deep-Seek V-3"
-        if "gpt-4o" in m or "gpt 4o" in m: return "GPT-4o"
-        if "4o-mini" in m or "gpt 4o-mini" in m or "gpt-4o-mini" in m: return "GPT 4o-Mini"
-        if "sabia" in m or "sabi" in m: return "Sabia 3.1"
-        return raw.strip()
+    # --------- parâmetros do caso ---------
+    k_default = _safe_int(ex.get("k"), 5)
+    gold      = _as_list(ex.get("gold"))
+    texto     = ex.get("texto", "")
 
-    # permitir ajustar k aqui no app (default = k do caso, fallback 5)
-    k_default = int(ex.get("k", 5))
-    with col_k:
-        k_sel = st.number_input("k (top-k)", min_value=1, max_value=20, value=k_default, step=1)
+    k_sel = st.number_input("k (top-k)", min_value=1, max_value=20, value=k_default, step=1)
 
-    # helpers de avaliação simples @k (compara por prefixo 3-char alfanumérico)
-    def _norm_code3(x):
-        s = "".join(ch for ch in str(x).upper() if ch.isalnum())
-        return s[:3] if s else s
+    # mostra texto se existir
+    if texto:
+        with st.expander("Texto do caso"):
+            st.write(texto)
 
-    gold3 = {_norm_code3(c) for c in (gold or []) if str(c).strip()}
-    def _hits_at_k(preds, k):
-        if not isinstance(preds, list):
-            return 0
-        top = preds[:k]
-        pred3 = {_norm_code3(c) for c in top if str(c).strip()}
-        return len(pred3 & gold3)
+    # --------- renderização dos modelos ---------
+    models_dict = ex.get("models", {}) or {}
+    if not models_dict:
+        st.warning("Nenhum modelo encontrado neste exemplo.")
+        st.stop()
 
-    # dividir em coluna ESQ (modelos individuais) e DIR (agregados)
+    # separar individuais e agregados
+    def _is_agregado(name: str) -> bool:
+        n = _norm(name)
+        return ("borda" in n) or ("plural" in n)
+
+    ind_models = [(pretty_model_name(k), v) for k, v in models_dict.items() if not _is_agregado(k) and "cid" not in _norm(k)]
+    agg_models = [(pretty_model_name(k), v) for k, v in models_dict.items() if _is_agregado(k)]
+
+    # normalização para comparação
+    gold_norm = set([_norm(c) for c in gold])
+
+    def render_preds(name, preds):
+        preds = _as_list(preds)
+        topk = preds[:k_sel]
+        hits = [c for c in topk if _norm(c) in gold_norm]
+        acc = 100.0 * len(hits) / max(1, len(gold_norm))
+        st.markdown(f"**{name}** — acertos@{k_sel}: {len(hits)}/{len(gold_norm)} ({acc:.1f}%)")
+        st.write(", ".join(topk) if topk else "—")
+
+    # layout: esquerda modelos individuais, direita agregados
     colL, colR = st.columns(2)
-
-    # ---------- ESQUERDA: modelos ----------
     with colL:
-        style_subtitle("Modelos individuais")
+        style_subtitle("Modelos")
+        for nm, preds in ind_models:
+            render_preds(nm, preds)
 
-        # ordem preferida e filtros para remover ruídos
-        preferred = ["GPT-4o", "Deep-Seek V-3", "Sabia 3.1", "Gemini 1.5 Flash", "GPT 4o-Mini"]
-        ban_keys  = {"api modelo tunado", "evolucao", "evolução", "_3char", "cid de alta"}  # para ignorar campos narrativos
-
-        # mapear, filtrar e ordenar
-        items = []
-        for raw_key, preds in (ex.get("models") or {}).items():
-            key_norm = _norm(raw_key)
-            if any(b in key_norm for b in ban_keys):
-                continue
-            nice = _nice(raw_key)
-            if nice in {"Borda", "Pluralidade"}:
-                continue  # agregados vão para a coluna da direita
-            items.append((nice, preds))
-
-        # ordenar: primeiro na ordem preferida, depois alfabético
-        def _rank(name):
-            return preferred.index(name) if name in preferred else (1000, name)
-        items = sorted(items, key=lambda x: (_rank(x[0]), x[0]))
-
-        if not items:
-            st.info("Sem modelos individuais neste caso.")
-        else:
-            for name, preds in items:
-                # header com badge de acertos@k
-                hits = _hits_at_k(preds, k_sel)
-                st.markdown(
-                    f"<div style='display:flex;align-items:center;gap:.5rem;'>"
-                    f"  <h5 style='margin:0;'>{name}</h5>"
-                    f"  <span style='background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;"
-                    f"             padding:2px 8px;border-radius:999px;font-weight:700;'>"
-                    f"    {hits} acertos@{k_sel}"
-                    f"  </span>"
-                    f"</div>", unsafe_allow_html=True
-                )
-                _render_tags((preds or [])[:k_sel], border="#E5E7EB", bg="#F9FAFB", fg="#111827")
-                st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
-
-    # ---------- DIREITA: agregados ----------
     with colR:
-        style_subtitle("Agregados (destaque)")
-
-        aggs_order = ["Borda", "Pluralidade"]
-        for agg_name in aggs_order:
-            # achar chave correspondente no JSON (pode vir com variações de nome)
-            cand = None
-            for raw_key, preds in (ex.get("models") or {}).items():
-                if _nice(raw_key) == agg_name:
-                    cand = preds
-                    break
-
-            if cand is None:
-                continue
-
-            hits = _hits_at_k(cand, k_sel)
-            # card destacado
-            st.markdown(
-                f"""
-                <div style="border:2px solid {'#111' if agg_name=='Borda' else '#0B3B2E'}; 
-                            background:{'#FFF7ED' if agg_name=='Borda' else '#ECFDF5'};
-                            border-radius:14px;padding:12px 14px;margin-bottom:10px;">
-                  <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:6px;">
-                    <h5 style="margin:0;">{agg_name}</h5>
-                    <span style="background:{'#FED7AA' if agg_name=='Borda' else '#A7F3D0'};
-                                 color:{'#7C2D12' if agg_name=='Borda' else '#065F46'};
-                                 border:1px solid { '#FDBA74' if agg_name=='Borda' else '#6EE7B7'};
-                                 padding:2px 8px;border-radius:999px;font-weight:800;">
-                      {hits} acertos@{k_sel}
-                    </span>
-                  </div>
-                  <div>
-                """,
-                unsafe_allow_html=True
-            )
-            _render_tags((cand or [])[:k_sel],
-                         border=("#FDBA74" if agg_name=="Borda" else "#6EE7B7"),
-                         bg=("#FFFBEB"    if agg_name=="Borda" else "#ECFDF5"),
-                         fg=("#7C2D12"    if agg_name=="Borda" else "#065F46"))
-            st.markdown("</div></div>", unsafe_allow_html=True)
-
-    st.divider()
-    st.caption("Obs.: Os “acertos@k” comparam prefixos 3-char alfanuméricos das predições com o conjunto gold do caso.")
+        style_subtitle("Agregados")
+        for nm, preds in agg_models:
+            render_preds(nm, preds)

@@ -240,153 +240,189 @@ tabs = st.tabs(["🗂️ Dashboard", "📊 Estatísticas", "🧪 Exemplos"])
 with tabs[0]:
     style_title("Dashboard")
 
-    # Filtros: Tipo, k e Agregação
-    colA, colB, colC = st.columns([1,1,1], gap="medium")
-    tipos = sorted(df["Tipo"].dropna().unique().tolist()) if "Tipo" in df.columns else ["Full"]
-    ks    = sorted(df["k"].dropna().unique().tolist()) if "k" in df.columns else [3]
-    with colA:
-        tipo = st.selectbox("Tipo", tipos, index=0)
-    with colB:
-        k = st.selectbox("k", ks, index=0)
-    with colC:
-        agg_choice = st.radio("Agregação", ["Micro", "Macro"], index=0, horizontal=True)
-
-    # Filtra (Tipo, k)
-    mask = (df["Tipo"].astype(str) == str(tipo)) & (df["k"] == int(k))
-    view = df.loc[mask].copy()
-    if view.empty:
-        st.warning("Sem dados para esse filtro.")
-        st.stop()
-
-    # Resolve nomes das colunas de métricas (para a agregação escolhida)
-    metric_cols = resolve_metric_columns(view, agg_choice)  # {'precision','recall','f1'}
-
-    # Ordena por F1 para ficar confortável
-    view = view.sort_values(metric_cols["f1"], ascending=False)
-
-    # Tabela (opcional) com nomes bonitos
-    with st.expander("Ver tabela de resultados (ordenada)", expanded=False):
-        cols_to_show = ["Modelo", metric_cols["precision"], metric_cols["recall"], metric_cols["f1"]]
-        for extra in ["TP","FP","FN"]:
-            if extra in view.columns:
-                cols_to_show.append(extra)
-        df_show = view[cols_to_show].copy()
-        df_show["Modelo"] = df_show["Modelo"].apply(pretty_model_name)
-        df_show = df_show.rename(columns={
-            metric_cols["precision"]: f"{agg_choice}_Precisão",
-            metric_cols["recall"]:    f"{agg_choice}_Recall",
-            metric_cols["f1"]:        f"{agg_choice}_F1"
-        })
-        st.dataframe(df_show, use_container_width=True, hide_index=True)
-
-    # ================== GRÁFICO AGRUPADO ==================
-    # Prepara dados no formato tidy: 3 linhas por modelo
-    plot_rows = []
-    for _, r in view.iterrows():
-        modelo = pretty_model_name(str(r["Modelo"]))
-        plot_rows.append({"Modelo": modelo, "Métrica": "Precisão", "Valor": float(r[metric_cols["precision"]])})
-        plot_rows.append({"Modelo": modelo, "Métrica": "Recall",   "Valor": float(r[metric_cols["recall"]])})
-        plot_rows.append({"Modelo": modelo, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
-    df_plot = pd.DataFrame(plot_rows)
-
-    # Desduplicação pós-pretty: mantém MAIOR valor por (Modelo, Métrica)
-    df_plot = (
-        df_plot
-        .groupby(["Modelo", "Métrica"], as_index=False, sort=False)["Valor"]
-        .max()
+    # Seletor para escolher o tipo de análise
+    modo_analise = st.radio(
+        "Selecione o modo de análise:",
+        ("Comparar Modelos", "Analisar 'k' por Modelo"),
+        horizontal=True,
+        label_visibility="collapsed"
     )
 
-    # Destacar agregados
-    HIGHLIGHT = {"Borda", "Pluralidade"}
-    df_plot["Agregado"] = df_plot["Modelo"].isin(HIGHLIGHT)
+    # --- MODO 1: COMPARAR DIFERENTES MODELOS ---
+    if modo_analise == "Comparar Modelos":
+        # Filtros: Tipo, k e Agregação
+        colA, colB, colC = st.columns([1,1,1], gap="medium")
+        tipos = sorted(df["Tipo"].dropna().unique().tolist()) if "Tipo" in df.columns else ["Full"]
+        ks    = sorted(df["k"].dropna().unique().tolist()) if "k" in df.columns else [3]
+        with colA:
+            tipo = st.selectbox("Tipo", tipos, index=0)
+        with colB:
+            k = st.selectbox("k", ks, index=0)
+        with colC:
+            agg_choice = st.radio("Agregação", ["Micro", "Macro"], index=0, horizontal=True)
 
-    # Ordena os modelos pelo F1-Score (decrescente) para o eixo X
-    df_f1_scores = df_plot[df_plot["Métrica"] == "F1"].sort_values("Valor", ascending=False)
-    order_domain = df_f1_scores["Modelo"].tolist()
+        # Filtra (Tipo, k)
+        mask = (df["Tipo"].astype(str) == str(tipo)) & (df["k"] == int(k))
+        view = df.loc[mask].copy()
+        if view.empty:
+            st.warning("Sem dados para esse filtro.")
+            st.stop()
 
-    # --- Barras agrupadas com destaque ---
-    try:
-        import altair as alt
+        # Resolve nomes das colunas de métricas (para a agregação escolhida)
+        metric_cols = resolve_metric_columns(view, agg_choice)
 
-        METRIC_COLORS = {"Precisão": COLOR_PREC, "Recall": COLOR_REC, "F1": COLOR_F1}
+        # Ordena por F1 para ficar confortável
+        view = view.sort_values(metric_cols["f1"], ascending=False)
 
-        # Base: todos os modelos com opacidade menor
-        base = (
-            alt.Chart(df_plot)
-            .mark_bar()
-            .encode(
-                x=alt.X(
-                    "Modelo:N",
-                    scale=alt.Scale(domain=order_domain),
-                    axis=alt.Axis(title=None, labelAngle=0, labelFontSize=14, labelColor="#222")
-                ),
-                y=alt.Y("Valor:Q", title=f"{agg_choice} (valor)"),
-                color=alt.Color(
-                    "Métrica:N",
-                    scale=alt.Scale(
-                        domain=list(METRIC_COLORS.keys()),
-                        range=[METRIC_COLORS[m] for m in METRIC_COLORS]
-                    ),
-                    legend=alt.Legend(title="Métrica")
-                ),
-                xOffset="Métrica:N",
-                opacity=alt.condition(alt.datum.Agregado == True, alt.value(1.0), alt.value(0.45)),
-                tooltip=["Modelo", "Métrica", alt.Tooltip("Valor:Q", format=".4f")]
+        # Tabela (opcional) com nomes bonitos
+        with st.expander("Ver tabela de resultados (ordenada)", expanded=False):
+            cols_to_show = ["Modelo", metric_cols["precision"], metric_cols["recall"], metric_cols["f1"]]
+            for extra in ["TP","FP","FN"]:
+                if extra in view.columns:
+                    cols_to_show.append(extra)
+            df_show = view[cols_to_show].copy()
+            df_show["Modelo"] = df_show["Modelo"].apply(pretty_model_name)
+            df_show = df_show.rename(columns={
+                metric_cols["precision"]: f"{agg_choice}_Precisão",
+                metric_cols["recall"]:    f"{agg_choice}_Recall",
+                metric_cols["f1"]:        f"{agg_choice}_F1"
+            })
+            st.dataframe(df_show, use_container_width=True, hide_index=True)
+
+        # Prepara dados no formato tidy para o gráfico
+        plot_rows = []
+        for _, r in view.iterrows():
+            modelo = pretty_model_name(str(r["Modelo"]))
+            plot_rows.append({"Modelo": modelo, "Métrica": "Precisão", "Valor": float(r[metric_cols["precision"]])})
+            plot_rows.append({"Modelo": modelo, "Métrica": "Recall",   "Valor": float(r[metric_cols["recall"]])})
+            plot_rows.append({"Modelo": modelo, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
+        df_plot = pd.DataFrame(plot_rows)
+
+        # Desduplicação pós-pretty
+        df_plot = df_plot.groupby(["Modelo", "Métrica"], as_index=False, sort=False)["Valor"].max()
+
+        # Destacar agregados
+        HIGHLIGHT = {"Borda", "Pluralidade"}
+        df_plot["Agregado"] = df_plot["Modelo"].isin(HIGHLIGHT)
+
+        # Ordena os modelos pelo F1-Score (decrescente) para o eixo X
+        df_f1_scores = df_plot[df_plot["Métrica"] == "F1"].sort_values("Valor", ascending=False)
+        order_domain = df_f1_scores["Modelo"].tolist()
+
+        # --- Gráfico de Barras Agrupadas ---
+        try:
+            import altair as alt
+
+            METRIC_COLORS = {"Precisão": COLOR_PREC, "Recall": COLOR_REC, "F1": COLOR_F1}
+
+            # Base: todos os modelos com cores vivas
+            base = (
+                alt.Chart(df_plot)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain), axis=alt.Axis(title=None, labelAngle=0, labelFontSize=14, labelColor="#222")),
+                    y=alt.Y("Valor:Q", title=f"{agg_choice} (valor)"),
+                    color=alt.Color("Métrica:N", scale=alt.Scale(domain=list(METRIC_COLORS.keys()), range=[METRIC_COLORS[m] for m in METRIC_COLORS]), legend=alt.Legend(title="Métrica")),
+                    xOffset="Métrica:N",
+                    tooltip=["Modelo", "Métrica", alt.Tooltip("Valor:Q", format=".4f")]
+                )
+                .properties(height=460)
             )
-            .properties(height=460)
-        )
 
-        # Overlay: só Borda/Pluralidade com contorno
-        overlay = (
-            alt.Chart(df_plot[df_plot["Agregado"]])
-            .mark_bar(stroke="#111", strokeWidth=2)
-            .encode(
-                x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain), axis=alt.Axis(title=None)),
-                y=alt.Y("Valor:Q"),
-                color=alt.Color(
-                    "Métrica:N",
-                    scale=alt.Scale(
-                        domain=list(METRIC_COLORS.keys()),
-                        range=[METRIC_COLORS[m] for m in METRIC_COLORS]
-                    ),
-                    legend=None
-                ),
-                xOffset="Métrica:N",
+            # Overlay: Usa APENAS o contorno para destacar Borda/Pluralidade
+            overlay = (
+                alt.Chart(df_plot[df_plot["Agregado"]])
+                .mark_bar(stroke="#111", strokeWidth=2, filled=False)
+                .encode(
+                    x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain), axis=alt.Axis(title=None)),
+                    y=alt.Y("Valor:Q"),
+                    xOffset="Métrica:N",
+                )
             )
-        )
-        
-        # Adiciona os RÓTULOS (texto) no topo das barras
-        text = base.mark_text(
-            align='center',
-            baseline='bottom',
-            dy=-5,  # Deslocamento vertical
-            fontSize=11
-        ).encode(
-            text=alt.Text('Valor:Q', format='.3f'), # Formato com 3 casas decimais
-            color=alt.value('black')
-        )
+            
+            # Adiciona os RÓTULOS (texto) no topo das barras
+            text = base.mark_text(
+                align='center', baseline='bottom', dy=-5, fontSize=11
+            ).encode(
+                text=alt.Text('Valor:Q', format='.3f'),
+                color=alt.value('black'),
+                xOffset="Métrica:N", # Para centralizar o texto em cada barra
+            )
 
-        # Une tudo: o gráfico base, o contorno de destaque e os rótulos
-        chart = (base + overlay + text)
-        st.altair_chart(chart, use_container_width=True)
+            chart = (base + overlay + text)
+            st.altair_chart(chart, use_container_width=True)
 
-    except Exception:
-        st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
-        st.dataframe(
-            df_plot.pivot(index="Modelo", columns="Métrica", values="Valor").reindex(order_domain),
-            use_container_width=True
-        )
+        except Exception:
+            st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
+            st.dataframe(df_plot.pivot(index="Modelo", columns="Métrica", values="Valor").reindex(order_domain), use_container_width=True)
 
-    # Δ vs. melhor modelo individual (pela F1 da agregação escolhida)
-    info = best_individual_delta(view, metric_cols["f1"])
-    if info:
-        best_name, best_val, val_borda, val_plural, d_borda, d_plural = info
-        style_subtitle("Δ vs. melhor modelo individual (pela F1)")
-        chip("Melhor Individual", f"{pretty_model_name(best_name)} ({best_val:.4f})", bg=PRIMARY)
-        if val_borda is not None:
-            chip("Borda", f"{val_borda:.4f} ({'+' if d_borda>=0 else ''}{d_borda:.4f})", bg=PRIMARY)
-        if val_plural is not None:
-            chip("Pluralidade", f"{val_plural:.4f} ({'+' if d_plural>=0 else ''}{d_plural:.4f})", bg=SECOND)
+        # Δ vs. melhor modelo individual
+        info = best_individual_delta(view, metric_cols["f1"])
+        if info:
+            best_name, best_val, val_borda, val_plural, d_borda, d_plural = info
+            style_subtitle("Δ vs. melhor modelo individual (pela F1)")
+            chip("Melhor Individual", f"{pretty_model_name(best_name)} ({best_val:.4f})", bg=PRIMARY)
+            if val_borda is not None:
+                chip("Borda", f"{val_borda:.4f} ({'+' if d_borda>=0 else ''}{d_borda:.4f})", bg=PRIMARY)
+            if val_plural is not None:
+                chip("Pluralidade", f"{val_plural:.4f} ({'+' if d_plural>=0 else ''}{d_plural:.4f})", bg=SECOND)
+
+    # --- MODO 2: ANALISAR 'k' POR MODELO ---
+    else:
+        # Filtros: Tipo, Modelo e Agregação
+        colA, colB, colC = st.columns([1, 2, 1], gap="medium")
+        with colA:
+            tipos = sorted(df["Tipo"].dropna().unique().tolist()) if "Tipo" in df.columns else ["Full"]
+            tipo = st.selectbox("Tipo", tipos, index=0)
+
+        with colB:
+            modelos_unicos = df["Modelo"].dropna().unique()
+            mapa_nomes = {m: pretty_model_name(m) for m in modelos_unicos}
+            nomes_bonitos_ordenados = sorted(list(set(mapa_nomes.values())))
+            modelo_selecionado_pretty = st.selectbox("Modelo", nomes_bonitos_ordenados, index=0)
+            modelo_original = [orig for orig, pretty in mapa_nomes.items() if pretty == modelo_selecionado_pretty][0]
+
+        with colC:
+            agg_choice = st.radio("Agregação", ["Micro", "Macro"], index=0, horizontal=True)
+
+        # Filtra o DataFrame para o Tipo e Modelo escolhidos, em todos os 'k'
+        mask = (df["Tipo"].astype(str) == str(tipo)) & (df["Modelo"] == modelo_original)
+        view_k = df.loc[mask].copy()
+
+        if view_k.empty:
+            st.warning("Sem dados para este modelo e tipo. Tente outra combinação.")
+            st.stop()
+
+        # Prepara dados para o gráfico de linhas
+        metric_cols = resolve_metric_columns(view_k, agg_choice)
+        plot_rows_k = []
+        for _, r in view_k.iterrows():
+            k_val = int(r["k"])
+            plot_rows_k.append({"k": k_val, "Métrica": "Precisão", "Valor": float(r[metric_cols["precision"]])})
+            plot_rows_k.append({"k": k_val, "Métrica": "Recall",   "Valor": float(r[metric_cols["recall"]])})
+            plot_rows_k.append({"k": k_val, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
+        df_plot_k = pd.DataFrame(plot_rows_k)
+
+        # --- Gráfico de Linhas ---
+        try:
+            import altair as alt
+
+            METRIC_COLORS = {"Precisão": COLOR_PREC, "Recall": COLOR_REC, "F1": COLOR_F1}
+            line_chart = alt.Chart(df_plot_k).mark_line(point=True, strokeWidth=3).encode(
+                x=alt.X('k:O', title='Valor de k', axis=alt.Axis(labelAngle=0)),
+                y=alt.Y('Valor:Q', title=f'Valor da Métrica ({agg_choice})', scale=alt.Scale(zero=False)),
+                color=alt.Color("Métrica:N", scale=alt.Scale(domain=list(METRIC_COLORS.keys()), range=[METRIC_COLORS[m] for m in METRIC_COLORS]), legend=alt.Legend(title="Métrica")),
+                tooltip=['k', 'Métrica', alt.Tooltip('Valor:Q', format='.4f')]
+            ).properties(
+                title=f"Desempenho de '{modelo_selecionado_pretty}' por 'k'",
+                height=450
+            ).configure_title(fontSize=20)
+            
+            st.altair_chart(line_chart, use_container_width=True)
+
+        except Exception:
+            st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
+            st.dataframe(df_plot_k, use_container_width=True)
 # ================== ESTATÍSTICAS ==================
 with tabs[1]:
     style_title("Estatísticas")

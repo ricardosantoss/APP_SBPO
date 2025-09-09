@@ -662,28 +662,98 @@ with tabs[2]:
 
     def _as_list(x):
         if isinstance(x, (list, tuple)):
-            return list(x)
+            return [str(v) for v in x]
         if x is None:
             return []
-        # se vier string única, vira lista de um
-        return [x]
+        return [str(x)]
 
-    def _is_noise_key(raw_name: str) -> bool:
-        """Chaves auxiliares/ruído (não são modelos)."""
-        n = _norm(raw_name)
-        return (
-            "_3char" in n
-            or " 3char" in n
-            or n.startswith("21.")             # '21. CID de Alta_3char'
-            or "cid de alta" in n
-            or "cid_de_alta" in n
-            or "evolucao" in n or "evolução" in raw_name.lower()
-        )
+    def normalize_code(c: str) -> str:
+        return str(c).strip().upper()
 
-    def _is_agregado(raw_or_pretty: str) -> bool:
-        """Detecção robusta de agregados."""
-        n = _norm(raw_or_pretty).replace("\u2011", "-")
-        return ("borda" in n) or ("plural" in n) or ("pluralidade" in n)
+    def unique_preserve(seq):
+        seen = set()
+        out = []
+        for x in seq:
+            xn = normalize_code(x)
+            if xn not in seen:
+                seen.add(xn)
+                out.append(x)
+        return out
+
+    # Pluralidade e Borda calculados em tempo real
+    from collections import defaultdict, Counter
+
+    def compute_plurality_and_borda(models_lists: dict, k: int):
+        """
+        models_lists: dict nome_modelo -> lista de códigos (ordem = ranking do modelo)
+        k: considerar apenas pos < k para votar/pontuar
+        Retorna:
+          - plural_rank: lista [(code_norm, freq_k, freq_all, avg_rank)]
+          - borda_rank:  lista [(code_norm, score_k, score_all, avg_rank)]
+          - display_map: dict code_norm -> label para exibição (usa forma mais comum)
+        """
+        # mapa "forma de exibição" mais comum
+        form_counter = defaultdict(Counter)
+
+        # pluralidade
+        freq_all = Counter()
+        freq_k   = Counter()
+
+        # borda
+        score_all = defaultdict(int)
+        score_k   = defaultdict(int)
+
+        # estatística auxiliar: ranks para avg_rank
+        rank_sum = defaultdict(float)
+        rank_cnt = defaultdict(int)
+
+        for mdl, raw_list in models_lists.items():
+            lst = unique_preserve(_as_list(raw_list))
+            # mapa code_norm -> primeira posição
+            for pos, code in enumerate(lst):
+                cn = normalize_code(code)
+                form_counter[cn][code] += 1
+
+                # pluralidade: conta 1 por modelo (presença)
+                freq_all[cn] += 1
+                # borda_all: peso decrescente por posição (quanto mais alto, mais ponto)
+                # aqui usamos um peso simples baseado no tamanho da lista
+                score_all[cn] += max(0, len(lst) - pos)
+
+                # avg_rank
+                rank_sum[cn] += (pos + 1)
+                rank_cnt[cn] += 1
+
+                # versões @k
+                if pos < k:
+                    freq_k[cn] += 1
+                    score_k[cn] += (k - pos)  # borda @k
+
+        # escolher a "melhor" forma para exibir cada código (mais frequente entre originais)
+        display_map = {}
+        for cn, ctr in form_counter.items():
+            display_map[cn] = ctr.most_common(1)[0][0]
+
+        # empates: ordenar por métrica @k e desempatar por total e avg_rank (menor melhor)
+        def to_plural_list():
+            items = []
+            for cn in set(list(freq_all.keys()) + list(freq_k.keys())):
+                avg_rank = (rank_sum[cn] / rank_cnt[cn]) if rank_cnt[cn] else 9999
+                items.append((cn, freq_k[cn], freq_all[cn], avg_rank))
+            # ordena: freq_k desc, freq_all desc, avg_rank asc, alfabético
+            items.sort(key=lambda t: (-t[1], -t[2], t[3], t[0]))
+            return items
+
+        def to_borda_list():
+            items = []
+            for cn in set(list(score_all.keys()) + list(score_k.keys())):
+                avg_rank = (rank_sum[cn] / rank_cnt[cn]) if rank_cnt[cn] else 9999
+                items.append((cn, score_k[cn], score_all[cn], avg_rank))
+            # ordena: score_k desc, score_all desc, avg_rank asc, alfabético
+            items.sort(key=lambda t: (-t[1], -t[2], t[3], t[0]))
+            return items
+
+        return to_plural_list(), to_borda_list(), display_map
 
     # --------- seletor do caso ---------
     case_labels = [_case_label(e, i) for i, e in enumerate(EXAMPLES)]
@@ -694,10 +764,11 @@ with tabs[2]:
 
     # --------- parâmetros do caso ---------
     k_default = _safe_int(ex.get("k"), 5)
-    gold      = _as_list(ex.get("gold"))
+    gold_raw  = _as_list(ex.get("gold"))
+    gold_norm = set(normalize_code(c) for c in gold_raw)
     texto     = ex.get("texto", "")
 
-    k_sel = st.number_input("k (top-k)", min_value=1, max_value=20, value=k_default, step=1)
+    k_sel = st.number_input("k (top-k considerado por modelo e pelos agregados)", min_value=1, max_value=30, value=k_default, step=1)
 
     if texto:
         with st.expander("Texto do caso"):
@@ -709,81 +780,95 @@ with tabs[2]:
         st.warning("Nenhum modelo encontrado neste exemplo.")
         st.stop()
 
-    # Normaliza/inspeciona todas as chaves e separa INDIVIDUAIS x AGREGADOS
-    inspected = []  # para debug
-    ind_models = []
-    agg_models = []
+    # Limpeza de chaves "não-modelo" (mantém tudo que pareça modelo; não depende de nomes específicos)
+    def is_noise_key(raw_name: str) -> bool:
+        n = _norm(raw_name)
+        return (
+            "_3char" in n or " 3char" in n or
+            n.startswith("21.") or "cid de alta" in n or "cid_de_alta" in n or
+            "evolucao" in n or "evolução" in raw_name.lower()
+        )
 
+    # Normaliza nomes de modelos para exibição
+    clean_models = {}
     for raw_name, preds in models_dict.items():
+        if is_noise_key(raw_name):
+            continue
         pretty = pretty_model_name(raw_name)
+        clean_models[pretty] = _as_list(preds)
 
-        # 1) se é agregado (por raw OU por pretty), entra SEMPRE (não passa no filtro de ruído)
-        if _is_agregado(raw_name) or _is_agregado(pretty):
-            agg_models.append((pretty, _as_list(preds), raw_name))
-            inspected.append({
-                "raw": raw_name, "pretty": pretty,
-                "is_agregado": True, "is_noise": False
-            })
-            continue
+    # ======= Cálculo online de Pluralidade e Borda (@k) a partir dos INDIVIDUAIS =======
+    # Considera TODOS os modelos presentes (não precisa que Borda/Pluralidade venham no JSON)
+    plural_rank, borda_rank, display_map = compute_plurality_and_borda(clean_models, k=k_sel)
 
-        # 2) se for ruído, pula
-        noise = _is_noise_key(raw_name)
-        if noise:
-            inspected.append({
-                "raw": raw_name, "pretty": pretty,
-                "is_agregado": False, "is_noise": True
-            })
-            continue
+    # ======= CSS para chips =======
+    st.markdown("""
+    <style>
+    .chip {display:inline-block;margin:2px 6px 2px 0;padding:6px 10px;border-radius:999px;
+           font-weight:600;border:1px solid #e5e7eb;color:#111;background:#F9FAFB;}
+    .ink   {background:#E5E7EB;}               /* cinza para fora do top-k */
+    .topk  {background:#DBEAFE;border-color:#93C5FD;} /* azul claro para top-k */
+    .hit   {box-shadow:0 0 0 2px #10B981 inset;} /* contorno verde se está no ouro */
+    .legend {font-size:0.9rem;color:#444}
+    </style>
+    """, unsafe_allow_html=True)
 
-        # 3) caso normal: individual
-        ind_models.append((pretty, _as_list(preds), raw_name))
-        inspected.append({
-            "raw": raw_name, "pretty": pretty,
-            "is_agregado": False, "is_noise": False
-        })
+    st.markdown(
+        "<div class='legend'>Legenda: <span class='chip topk'>Top-k</span> "
+        "<span class='chip ink'>Fora do k</span> "
+        "<span class='chip hit'>Acerto (no ouro)</span></div>",
+        unsafe_allow_html=True
+    )
 
-    # DEBUG: ver o que foi detectado
-    with st.expander("Ver chaves detectadas (debug)"):
-        st.write(pd.DataFrame(inspected))
-
-    # Ordena alfabeticamente para consistência visual
-    ind_models = sorted(ind_models, key=lambda x: x[0])
-    agg_models = sorted(agg_models, key=lambda x: x[0])
-
-    # Conjunto ouro normalizado para “acertos@k”
-    gold_norm = set([_norm(c) for c in gold])
-
-    def render_preds(name, preds):
-        topk = preds[:k_sel]
-        hits = [c for c in topk if _norm(c) in gold_norm]
-        acc = 100.0 * len(hits) / max(1, len(gold_norm))
-        # lista colorida (acerto = verde, erro = cinza)
+    # ======= Render: esquerda = modelos; direita = agregados calculados =======
+    def render_pred_list(name, ordered_codes, k, gold_norm):
+        """Mostra TODOS os códigos, destacando os k primeiros e acertos."""
+        uniq = unique_preserve(ordered_codes)
         chips = []
-        for c in topk:
-            ok = (_norm(c) in gold_norm)
-            chips.append(
-                f"<span style='display:inline-block;margin:2px 6px 2px 0;"
-                f"padding:4px 8px;border-radius:999px;"
-                f"background:{'#DCFCE7' if ok else '#F3F4F6'};"
-                f"color:{'#065F46' if ok else '#111'};font-weight:600;'>{c}</span>"
-            )
-        st.markdown(f"**{name}** — acertos@{k_sel}: {len(hits)}/{max(1,len(gold_norm))} ({acc:.1f}%)", unsafe_allow_html=True)
+        for i, code in enumerate(uniq):
+            cn = normalize_code(code)
+            cls = ["chip"]
+            if i < k: cls.append("topk")
+            else:     cls.append("ink")
+            if cn in gold_norm: cls.append("hit")
+            chips.append(f"<span class='{' '.join(cls)}'>{code}</span>")
+        st.markdown(f"**{name}**", unsafe_allow_html=True)
         st.markdown(" ".join(chips) if chips else "—", unsafe_allow_html=True)
 
-    # layout: esquerda individuais, direita agregados
     colL, colR = st.columns(2)
+
+    # ======= ESQUERDA: todos os modelos individuais =======
     with colL:
-        style_subtitle("Modelos")
-        if not ind_models:
+        style_subtitle("Modelos (todos os códigos, com top-k destacado)")
+        if not clean_models:
             st.info("Sem modelos individuais neste caso.")
         else:
-            for nm, preds, _raw in ind_models:
-                render_preds(nm, preds)
+            # ordem alfabética por nome "bonito"
+            for mdl_name in sorted(clean_models.keys()):
+                render_pred_list(mdl_name, clean_models[mdl_name], k_sel, gold_norm)
 
+    # ======= DIREITA: agregados calculados em tempo real =======
     with colR:
-        style_subtitle("Agregados")
-        if not agg_models:
-            st.warning("Nenhum agregado (Borda/Pluralidade) presente neste caso.")
-        else:
-            for nm, preds, _raw in agg_models:
-                render_preds(nm, preds)
+        style_subtitle("Agregados (calculados agora)")
+
+        # --- Pluralidade ---
+        # usamos ranking por freq_k (desc) → freq_all (desc) → avg_rank (asc)
+        plural_codes_ordered = [display_map[cn] for (cn, _, _, _) in plural_rank]
+        render_pred_list("Pluralidade (freq @k)", plural_codes_ordered, k_sel, gold_norm)
+
+        # Exibir um pequeno resumo de contagens para top-k:
+        if plural_rank:
+            topk_set = set(normalize_code(display_map[cn]) for cn, _, _, _ in plural_rank[:k_sel])
+            total_votos_k = sum(frk for _, frk, _, _ in plural_rank)
+            st.caption(f"Pluralidade @k: soma de votos nos top-k dos modelos = {total_votos_k}")
+
+        st.divider()
+
+        # --- Borda ---
+        # usamos ranking por score_k (desc) → score_all (desc) → avg_rank (asc)
+        borda_codes_ordered = [display_map[cn] for (cn, _, _, _) in borda_rank]
+        render_pred_list("Borda (pontuação @k)", borda_codes_ordered, k_sel, gold_norm)
+
+        if borda_rank:
+            total_pontos_k = sum(sc for _, sc, _, _ in borda_rank)
+            st.caption(f"Borda @k: soma de pontos nos top-k dos modelos = {total_pontos_k}")

@@ -185,7 +185,7 @@ stats = load_json(json_path)
 st.markdown(
     f"""
     <div style="padding:8px 0 0 0">
-        <h1 style="margin:0;color:{PRIMARY};">Ensemble simples, ganho real</h1>
+        <h1 style="margin:0;color:{PRIMARY};">AGREGAÇÃO DE PREDIÇÕES DE GRANDES MODELOS DE LINGUAGEM VIA MÉTODOS DE DECISÃO EM GRUPO PARA A CODIFICAÇÃO AUTOMÁTICA DE DIAGNÓSTICOS CLÍNICOS</h1>
         <p style="margin:4px 0 0 0;color:#333;">
             Comparação de modelos individuais vs. agregação (Pluralidade / Borda) para codificação CID-10.
             App offline com dados pré-computados.

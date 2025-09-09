@@ -196,7 +196,8 @@ st.markdown(
 )
 
 # ================== ABAS ==================
-tabs = st.tabs(["🗂️ Dashboard", "📊 Estatísticas"])
+tabs = st.tabs(["🗂️ Dashboard", "📊 Estatísticas", "🧪 Exemplos"])
+
 
 # ================== DASHBOARD ==================
 with tabs[0]:

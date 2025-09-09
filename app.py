@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Paleta (cores por MÉTRICA, não por tipo de modelo)
+# Paleta (cores por MÉTRICA)
 COLOR_PREC = "#5DA3F2"   # Precisão  (azul claro)
 COLOR_REC  = "#0F3D7A"   # Recall    (azul escuro)
 COLOR_F1   = "#246BCE"   # F1        (azul médio)
@@ -224,28 +224,46 @@ with tabs[0]:
         plot_rows.append({"Modelo": modelo, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
     df_plot = pd.DataFrame(plot_rows)
 
-    # Gráfico: small multiples (3 colunas) — cores por MÉTRICA
+    # --- Gráfico: barras agrupadas (3 por modelo) ---
     try:
         import altair as alt
 
-        METRIC_COLORS = {"Precisão": COLOR_PREC, "Recall": COLOR_REC, "F1": COLOR_F1}
+        METRIC_COLORS = {
+            "Precisão": COLOR_PREC,
+            "Recall": COLOR_REC,
+            "F1": COLOR_F1
+        }
 
         chart = (
             alt.Chart(df_plot)
             .mark_bar()
             .encode(
-                x=alt.X("Modelo:N", sort=None, axis=alt.Axis(labelAngle=-20, title=None)),
+                x=alt.X(
+                    "Modelo:N",
+                    axis=alt.Axis(
+                        title=None,
+                        labelAngle=0,
+                        labelFontSize=13,   # 👈 nome do modelo maior
+                        labelColor="#222"
+                    )
+                ),
                 y=alt.Y("Valor:Q", title=f"{agg_choice} (valor)"),
-                color=alt.Color("Métrica:N",
-                                scale=alt.Scale(domain=list(METRIC_COLORS.keys()),
-                                                range=[METRIC_COLORS[m] for m in METRIC_COLORS]),
-                                legend=alt.Legend(title=None, orient="top")),
-                column=alt.Column("Métrica:N", spacing=8, header=alt.Header(title=None))
+                color=alt.Color(
+                    "Métrica:N",
+                    scale=alt.Scale(
+                        domain=list(METRIC_COLORS.keys()),
+                        range=[METRIC_COLORS[m] for m in METRIC_COLORS]
+                    ),
+                    legend=alt.Legend(title="Métrica")
+                ),
+                xOffset="Métrica:N",   # 👈 agrupa 3 barras por modelo
+                tooltip=["Modelo", "Métrica", "Valor"]
             )
-            .properties(height=380)
-            .resolve_scale(y="independent")  # cada painel pode ter sua própria escala
+            .properties(height=440)
         )
+
         st.altair_chart(chart, use_container_width=True)
+
     except Exception:
         st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
         st.dataframe(df_plot.pivot(index="Modelo", columns="Métrica", values="Valor"), use_container_width=True)
@@ -254,7 +272,7 @@ with tabs[0]:
     info = best_individual_delta(view, metric_cols["f1"])
     if info:
         best_name, best_val, val_borda, val_plural, d_borda, d_plural = info
-        style_subtitle("Δ vs. melhor modelo individual")
+        style_subtitle("Δ vs. melhor modelo individual (pela F1)")
         chip("Melhor Individual", f"{best_name} ({best_val:.4f})", bg=PRIMARY)
         if val_borda is not None:
             chip("Borda", f"{val_borda:.4f} ({'+' if d_borda>=0 else ''}{d_borda:.4f})", bg=PRIMARY)

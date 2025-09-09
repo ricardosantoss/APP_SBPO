@@ -412,7 +412,11 @@ with tabs[1]:
             })
         df_stats_modelo = pd.DataFrame(rows).sort_values("Modelo")
         st.dataframe(df_stats_modelo, use_container_width=True, hide_index=True)
-cobertura_pm = stats.get("Cobertura_por_modelo", {})
+
+    st.divider()
+
+    # — Cobertura por modelo (full e 3-char)
+    cobertura_pm = stats.get("Cobertura_por_modelo", {})
     if not cobertura_pm:
         st.info("Para ver cobertura por modelo (full e 3-char, %Top10 e %Top20), gere 'Cobertura_por_modelo' no stats.json.")
     else:
@@ -423,7 +427,6 @@ cobertura_pm = stats.get("Cobertura_por_modelo", {})
         for raw_name, d in cobertura_pm.items():
             pretty = pretty_model_name(raw_name)
             items.append((pretty, raw_name))
-        # ordenar alfabeticamente pelos nomes bonitos
         items = sorted(items, key=lambda x: x[0])
 
         col_sel, _ = st.columns([2,1])
@@ -431,11 +434,9 @@ cobertura_pm = stats.get("Cobertura_por_modelo", {})
             pretty_names = [p for p, _ in items]
             choice = st.selectbox("Modelo", pretty_names, index=0)
 
-        # recuperar o dicionário do modelo escolhido
         raw_key = dict(items)[choice]
         d = cobertura_pm.get(raw_key, {})
 
-        # Extrair métricas com defaults seguros
         n_leaf = int(d.get("Codigos_folha_distintos", 0))
         n_3ch  = int(d.get("Categorias_3char_distintas", 0))
 
@@ -463,10 +464,10 @@ cobertura_pm = stats.get("Cobertura_por_modelo", {})
 
         st.divider()
 
-        # (Opcional) Mostrar Top-10 como barras para inspeção rápida
+        # Top-10 distribuições
         import altair as alt
-        top10_full  = cov_full.get("Top10", {}) or cov_full.get("Top_10", {}) or cov_full.get("Top-10", {}) or cov_full.get("Top10", {})
-        top10_3char = cov_3char.get("Top10", {}) or cov_3char.get("Top_10", {}) or cov_3char.get("Top-10", {}) or cov_3char.get("Top10", {})
+        top10_full  = cov_full.get("Top10", {}) or {}
+        top10_3char = cov_3char.get("Top10", {}) or {}
 
         colL, colR = st.columns(2)
         if top10_full:
@@ -500,7 +501,7 @@ cobertura_pm = stats.get("Cobertura_por_modelo", {})
 
         st.divider()
 
-        # Tabela-resumo com TODOS os modelos (para comparar lado a lado)
+        # Tabela-resumo com TODOS os modelos
         rows = []
         for raw_name, dmodel in cobertura_pm.items():
             pretty = pretty_model_name(raw_name)
@@ -516,6 +517,7 @@ cobertura_pm = stats.get("Cobertura_por_modelo", {})
             rows.append(r)
         df_resumo = pd.DataFrame(rows).sort_values("Modelo")
         st.dataframe(df_resumo, use_container_width=True, hide_index=True)
+
     # — Rodapé/meta (se existir)
     meta = stats.get("meta", {})
     if meta:

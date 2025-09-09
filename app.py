@@ -125,26 +125,30 @@ def best_individual_delta(df_slice: pd.DataFrame, f1_col: str):
     return (best_name, best_val, val_borda, val_plural, delta_borda, delta_plural)
 
 # -------- nomes bonitos para exibição --------
+# -------- nomes bonitos para exibição --------
 def pretty_model_name(raw: str) -> str:
     """
     Converte rótulos do CSV para os nomes desejados para exibição:
       GPT-4o • Deep-Seek V-3 • Sabia 3.1 • Pluralidade • Borda • Gemini 1.5 Flash • GPT 4o-Mini
     """
     m = _norm(raw).replace("\u2011", "-")  # normaliza
+
     # Agregados primeiro
     if "borda" in m: return "Borda"
     if "plural" in m: return "Pluralidade"
-    # Modelos
-    if "4o-mini" in m or "gpt-4o-mini" in m or "gpt 4o-mini" in m:
+    
+    # Modelos (com as novas regras)
+    if "4o-mini" in m or "gpt-4o-mini" in m or "gpt 4o-mini" in m or "gpt-mini" in m:
         return "GPT 4o-Mini"
     if "gpt-4o" in m or "gpt 4o" in m:
         return "GPT-4o"
     if "deep" in m and "seek" in m:
         return "Deep-Seek V-3"
-    if "sabi" in m:   # cobre "sabia" e "sabiá"
+    if "sabi" in m or "maritalk" in m:  # cobre "sabia", "sabiá" e agora "maritalk"
         return "Sabia 3.1"
-    if "gemini" in m and "flash" in m:
+    if "gemini" in m:  # captura "gemini", "gemini 1.5 flash", etc.
         return "Gemini 1.5 Flash"
+        
     # fallback: mantém original
     return str(raw).strip()
 

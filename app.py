@@ -303,7 +303,7 @@ with tabs[0]:
     df_f1_scores = df_plot[df_plot["Métrica"] == "F1"].sort_values("Valor", ascending=False)
     order_domain = df_f1_scores["Modelo"].tolist()
 
-    # --- Barras agrupadas com destaque ---
+# --- Barras agrupadas com destaque ---
     try:
         import altair as alt
 
@@ -353,22 +353,31 @@ with tabs[0]:
                 xOffset="Métrica:N",
             )
         )
+        
+        # <<<<<<< CÓDIGO NOVO FICA AQUI, DENTRO DO TRY >>>>>>>
+        # Adiciona os RÓTULOS (texto) no topo das barras
+        text = base.mark_text(
+            align='center',
+            baseline='bottom',
+            dy=-5,  # Deslocamento vertical para ficar um pouco acima da barra
+            fontSize=11
+        ).encode(
+            text=alt.Text('Valor:Q', format='.3f'), # Formata para 3 casas decimais
+            color=alt.value('black') # Cor do texto, pode ser '#333'
+        )
 
-        chart = (base + overlay)
+        # Une tudo: o gráfico base, o contorno de destaque e os rótulos
+        chart = (base + overlay + text)
         st.altair_chart(chart, use_container_width=True)
 
-    # (Dentro do with tabs[0]:, depois de definir `base` e `overlay`)
-
-# --- Adiciona os RÓTULOS (texto) no topo das barras ---
-text = base.mark_text(
-    align='center',
-    baseline='bottom',
-    dy=-5,  # Deslocamento vertical para ficar um pouco acima da barra
-    fontSize=11
-).encode(
-    text=alt.Text('Valor:Q', format='.3f'), # Formata para 3 casas decimais
-    color=alt.value('black') # Cor do texto
-)
+    except Exception as e:
+        # É uma boa prática capturar a exceção para entender possíveis erros
+        # st.error(f"Erro ao gerar o gráfico: {e}") 
+        st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
+        st.dataframe(
+            df_plot.pivot(index="Modelo", columns="Métrica", values="Valor").reindex(order_domain),
+            use_container_width=True
+        )
 
 # Une o gráfico base, o contorno e os rótulos
 chart = (base + overlay + text).configure_axis(

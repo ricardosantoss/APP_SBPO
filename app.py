@@ -663,6 +663,24 @@ with tabs[2]:
     def _as_list(x):
         return x if isinstance(x, (list, tuple)) else []
 
+    def _is_noise_key(raw_name: str) -> bool:
+        """Chaves que não são modelos (ex.: 3char auxiliares, 'CID de Alta', evoluções etc.)."""
+        n = _norm(raw_name)
+        return (
+            "_3char" in n
+            or " 3char" in n
+            or n.startswith("21.")             # casos do tipo '21. CID de Alta_3char'
+            or "cid de alta" in n
+            or "cid_de_alta" in n
+            or "evolucao" in n or "evolução" in raw_name.lower()
+        )
+
+    def _is_agregado(raw_name: str) -> bool:
+        """Detecção robusta de agregados (Borda/Pluralidade)."""
+        n = _norm(raw_name).replace("\u2011", "-")
+        # cobre 'borda', 'plural', 'pluralidade' e variações
+        return ("borda" in n) or ("plural" in n)
+
     # --------- seletor do caso ---------
     case_labels = [_case_label(e, i) for i, e in enumerate(EXAMPLES)]
     case_idx = st.selectbox("Caso", options=list(range(len(EXAMPLES))),
@@ -688,13 +706,30 @@ with tabs[2]:
         st.warning("Nenhum modelo encontrado neste exemplo.")
         st.stop()
 
-    # separar individuais e agregados
-    def _is_agregado(name: str) -> bool:
-        n = _norm(name)
-        return ("borda" in n) or ("plural" in n)
+    # Limpa ruídos e normaliza nomes já no dicionário
+    cleaned_items = []
+    for raw_name, preds in models_dict.items():
+        if _is_noise_key(raw_name):
+            continue
+        pretty = pretty_model_name(raw_name)
+        cleaned_items.append((pretty, preds, raw_name))  # guarda também o raw
 
-    ind_models = [(pretty_model_name(k), v) for k, v in models_dict.items() if not _is_agregado(k) and "cid" not in _norm(k)]
-    agg_models = [(pretty_model_name(k), v) for k, v in models_dict.items() if _is_agregado(k)]
+    if not cleaned_items:
+        st.warning("Nenhum modelo válido após limpeza de chaves auxiliares.")
+        st.stop()
+
+    # separa individuais e agregados (com base no RAW para detecção, mas exibe PRETTY)
+    ind_models = []
+    agg_models = []
+    for pretty, preds, raw in cleaned_items:
+        if _is_agregado(raw) or _is_agregado(pretty):
+            agg_models.append((pretty, preds))
+        else:
+            ind_models.append((pretty, preds))
+
+    # Ordena por nome para consistência visual
+    ind_models = sorted(ind_models, key=lambda x: x[0])
+    agg_models = sorted(agg_models, key=lambda x: x[0])
 
     # normalização para comparação
     gold_norm = set([_norm(c) for c in gold])
@@ -704,17 +739,34 @@ with tabs[2]:
         topk = preds[:k_sel]
         hits = [c for c in topk if _norm(c) in gold_norm]
         acc = 100.0 * len(hits) / max(1, len(gold_norm))
-        st.markdown(f"**{name}** — acertos@{k_sel}: {len(hits)}/{len(gold_norm)} ({acc:.1f}%)")
-        st.write(", ".join(topk) if topk else "—")
+        # lista colorida (acerto = verde, erro = cinza)
+        chips = []
+        for c in topk:
+            ok = (_norm(c) in gold_norm)
+            chips.append(
+                f"<span style='display:inline-block;margin:2px 6px 2px 0;"
+                f"padding:4px 8px;border-radius:999px;"
+                f"background:{'#DCFCE7' if ok else '#F3F4F6'};"
+                f"color:{'#065F46' if ok else '#111'};font-weight:600;'>{c}</span>"
+            )
+        st.markdown(f"**{name}** — acertos@{k_sel}: {len(hits)}/{max(1,len(gold_norm))} ({acc:.1f}%)", unsafe_allow_html=True)
+        st.markdown(" ".join(chips) if chips else "—", unsafe_allow_html=True)
 
     # layout: esquerda modelos individuais, direita agregados
     colL, colR = st.columns(2)
     with colL:
         style_subtitle("Modelos")
-        for nm, preds in ind_models:
-            render_preds(nm, preds)
+        if not ind_models:
+            st.info("Sem modelos individuais neste caso.")
+        else:
+            for nm, preds in ind_models:
+                render_preds(nm, preds)
 
     with colR:
         style_subtitle("Agregados")
-        for nm, preds in agg_models:
-            render_preds(nm, preds)
+        if not agg_models:
+            st.warning("Nenhum agregado (Borda/Pluralidade) presente neste caso.")
+        else:
+            for nm, preds in agg_models:
+                render_preds(nm, preds)
+

@@ -182,19 +182,18 @@ df = load_csv(csv_path)
 stats = load_json(json_path)
 
 # ================== HEADER ==================
-# ================== HEADER ==================
 st.markdown(
     f"""
     <div style="padding:8px 0 0 0; text-align:center;">
         <h1 style="margin:0;color:{PRIMARY}; font-size:28px; font-weight:700; line-height:1.2;">
             Agregação de predições de grandes modelos de linguagem via métodos de decisão em grupo para a codificação automática de diagnósticos clínicos
         </h1>
-        <p style="margin:12px 0 0 0;color:#333; font-size:18px; font-weight:600; line-height:1.4;">
-            Ricardo da Silva Santos (UNICAMP)<sup>1</sup><br>
-            Murilo Gleyson Gazzola (MACKENZIE)<sup>2</sup><br>
-            Renato Teixeira Souza (UNICAMP)<sup>3</sup><br>
-            Rodolfo de Carvalho Pacagnella (UNICAMP)<sup>3</sup><br>
-            Cristiano Torezan (UNICAMP)<sup>4</sup>
+        <p style="margin:12px 0 0 0; color:#1f77b4; font-size:18px; font-weight:600; line-height:1.6;">
+            Ricardo da Silva Santos (UNICAMP) • 
+            Murilo Gleyson Gazzola (MACKENZIE) • 
+            Renato Teixeira Souza (UNICAMP) • 
+            Rodolfo de Carvalho Pacagnella (UNICAMP) • 
+            Cristiano Torezan (UNICAMP)
         </p>
     </div>
     """,

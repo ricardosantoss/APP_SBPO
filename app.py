@@ -357,6 +357,10 @@ with tabs[0]:
         chart = (base + overlay)
         st.altair_chart(chart, use_container_width=True)
 
+        # Ordena os modelos pelo F1-Score (decrescente) para o eixo X
+    df_f1_scores = df_plot[df_plot["Métrica"] == "F1"].sort_values("Valor", ascending=False)
+    order_domain = df_f1_scores["Modelo"].tolist()
+
     except Exception:
         st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
         st.dataframe(

@@ -367,27 +367,41 @@ with tabs[0]:
             if val_plural is not None:
                 chip("Pluralidade", f"{val_plural:.4f} ({'+' if d_plural>=0 else ''}{d_plural:.4f})", bg=SECOND)
 
-    # --- MODO 2: ANALISAR 'k' POR MODELO ---
+        # --- MODO 2: ANALISAR 'k' POR MODELO (CORRIGIDO) ---
     else:
         # Filtros: Tipo, Modelo e Agregação
         colA, colB, colC = st.columns([1, 2, 1], gap="medium")
+        
         with colA:
             tipos = sorted(df["Tipo"].dropna().unique().tolist()) if "Tipo" in df.columns else ["Full"]
             tipo = st.selectbox("Tipo", tipos, index=0)
 
+        # A LÓGICA FOI AJUSTADA AQUI
         with colB:
-            modelos_unicos = df["Modelo"].dropna().unique()
+            # 1. Filtra o DataFrame pelo 'Tipo' selecionado PRIMEIRO
+            df_tipo_filtrado = df[df["Tipo"] == tipo]
+
+            # 2. Agora, cria a lista de modelos a partir do DataFrame já filtrado
+            modelos_unicos = df_tipo_filtrado["Modelo"].dropna().unique()
             mapa_nomes = {m: pretty_model_name(m) for m in modelos_unicos}
+            
             nomes_bonitos_ordenados = sorted(list(set(mapa_nomes.values())))
+            
+            if not nomes_bonitos_ordenados:
+                st.warning(f"Nenhum modelo encontrado para o tipo '{tipo}'.")
+                st.stop()
+
             modelo_selecionado_pretty = st.selectbox("Modelo", nomes_bonitos_ordenados, index=0)
+            
+            # 3. A busca pelo nome original agora não tem ambiguidade
             modelo_original = [orig for orig, pretty in mapa_nomes.items() if pretty == modelo_selecionado_pretty][0]
 
         with colC:
             agg_choice = st.radio("Agregação", ["Micro", "Macro"], index=0, horizontal=True)
 
-        # Filtra o DataFrame para o Tipo e Modelo escolhidos, em todos os 'k'
-        mask = (df["Tipo"].astype(str) == str(tipo)) & (df["Modelo"] == modelo_original)
-        view_k = df.loc[mask].copy()
+        # O filtro principal agora usa o 'df_tipo_filtrado' para mais eficiência
+        mask = (df_tipo_filtrado["Modelo"] == modelo_original)
+        view_k = df_tipo_filtrado.loc[mask].copy()
 
         if view_k.empty:
             st.warning("Sem dados para este modelo e tipo. Tente outra combinação.")
@@ -423,6 +437,7 @@ with tabs[0]:
         except Exception:
             st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
             st.dataframe(df_plot_k, use_container_width=True)
+
 # ================== ESTATÍSTICAS ==================
 with tabs[1]:
     style_title("Estatísticas")

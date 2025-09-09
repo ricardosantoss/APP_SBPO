@@ -629,62 +629,73 @@ with tabs[1]:
 
 # ================== EXEMPLOS ==================
 # ================== EXEMPLOS ==================
+@st.cache_data(show_spinner=False)
+def load_examples(path: str):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # Garante lista
+        if isinstance(data, dict):
+            # permite {"examples":[...]}
+            data = data.get("examples", [])
+        if not isinstance(data, list):
+            return []
+        return data
+    except FileNotFoundError:
+        return []
+    except Exception:
+        # Se algo deu ruim no parse, volta lista vazia pra não quebrar o app
+        return []
+
 with tabs[2]:
     style_title("Exemplos")
 
+    # Carrega examples.json (na mesma pasta do app)
+    EXAMPLES_PATH = os.path.join(DATA_DIR, "examples.json")
+    examples = load_examples(EXAMPLES_PATH)
+
+    if not examples:
+        st.info("Nenhum exemplo encontrado. Certifique-se de que **examples.json** está na raiz do app.")
+        st.stop()
+
     # ---- Helpers locais desta aba ----
     def _to_codes(val):
-        # Converte uma célula do JSON para lista de strings
         if val is None:
             return []
         if isinstance(val, (list, tuple)):
             return [str(x).strip().upper() for x in val]
-        # strings únicas
         return [str(val).strip().upper()]
 
     def _top_k(seq, k):
         return list(seq)[:max(0, int(k))]
 
     def _aggregate_pluralidade(models_dict):
-        """Conta votos por código (todos os códigos de cada modelo contam 1 voto)."""
         from collections import Counter
         votes = Counter()
         for codes in models_dict.values():
             for c in _to_codes(codes):
                 votes[c] += 1
-        return votes  # Counter
+        return votes
 
     def _aggregate_borda(models_dict):
-        """
-        Soma posições (Borda) por código:
-          1º = +k_max, 2º = +(k_max-1), ... até 1
-        *Importante*: somamos sobre TODAS as posições disponíveis em cada modelo.
-        """
         from collections import defaultdict
         score = defaultdict(int)
-        # usamos um k_max "grande" local para gerar pesos decrescentes estáveis
-        # mas o peso real por posição é baseado no tamanho da lista do próprio modelo
         for codes in models_dict.values():
             lst = _to_codes(codes)
             n = len(lst)
-            # pesos de Borda: n, n-1, ..., 1
             for i, code in enumerate(lst):
-                weight = n - i
+                weight = n - i  # 1º vale n, 2º vale n-1, ..., até 1
                 score[code] += weight
-        return score  # dict
+        return score
 
     # ----- Escolha do caso -----
-    if not examples:
-        st.info("Nenhum exemplo encontrado (examples.json).")
-        st.stop()
-
     case_ids = [ex.get("id", f"case-{i+1}") for i, ex in enumerate(examples)]
     csel, kcol, tcol = st.columns([3, 1, 1])
     with csel:
         case_idx = st.selectbox("Caso", options=list(range(len(examples))),
                                 format_func=lambda i: case_ids[i], index=0)
 
-    # k SEMPRE entre 1 e 10 (fixo)
+    # k entre 1 e 10 (fixo)
     with kcol:
         k_sel = st.slider("k (top-k a destacar)", min_value=1, max_value=10, value=5, step=1)
 
@@ -695,9 +706,9 @@ with tabs[2]:
     ex = examples[case_idx]
     gold = _to_codes(ex.get("gold", []))
     texto = ex.get("texto", "")
-    models_raw = ex.get("models", {}) or {}
+    models_raw = (ex.get("models", {}) or {}).copy()
 
-    # Remover "modelo tunado" se houver (pelo nome)
+    # Remover "modelo tunado" se houver
     filtered_models = {}
     for raw_name, preds in models_raw.items():
         nrm = unicodedata.normalize("NFKD", str(raw_name)).encode("ascii", "ignore").decode("ascii").lower()
@@ -719,7 +730,6 @@ with tabs[2]:
     with col_left:
         style_subtitle("Modelos (todas as predições; destaque = top-k)")
 
-        # Ordenar por nome bonito (se tiver pretty_model_name)
         def _pretty(m):
             try:
                 return pretty_model_name(m)
@@ -735,7 +745,6 @@ with tabs[2]:
                 codes_all = _to_codes(preds)
                 topk_set = set(_top_k(codes_all, k_sel))
 
-                # badge do modelo
                 st.markdown(
                     f"<div style='display:inline-block;padding:6px 10px;border-radius:999px;"
                     f"background:{SECOND};color:#fff;font-weight:600;margin:8px 0;'>"
@@ -747,12 +756,10 @@ with tabs[2]:
                     st.caption("— sem predições —")
                     continue
 
-                # listar TODOS os códigos, marcando os que caem no top-k desse modelo
-                # e marcando se batem o gold
                 for i, c in enumerate(codes_all, start=1):
                     is_top = (c in topk_set)
                     is_hit = (c in set(gold)) if gold else False
-                    bg = "#FFF7ED" if is_top else "#F8FAFC"  # top-k = levemente destacado
+                    bg = "#FFF7ED" if is_top else "#F8FAFC"
                     br = "#F59E0B" if is_top else "#E5E7EB"
                     mark = "✅" if is_hit else ""
                     st.markdown(
@@ -772,7 +779,6 @@ with tabs[2]:
         # 1) Pluralidade: votos por código
         votes = _aggregate_pluralidade(models_raw)
         if votes:
-            # Ordenar por contagem desc
             sorted_votes = sorted(votes.items(), key=lambda x: (-x[1], x[0]))
             topk_plural = set([c for c, _ in sorted_votes[:k_sel]])
 
@@ -780,8 +786,7 @@ with tabs[2]:
             for c, v in sorted_votes:
                 is_top = (c in topk_plural)
                 is_hit = (c in set(gold)) if gold else False
-                # destaque leve nos top-k do agregado
-                bg = "#ECFDF5" if is_top else "#F8FAFC"   # verde claro p/ top-k
+                bg = "#ECFDF5" if is_top else "#F8FAFC"
                 br = "#10B981" if is_top else "#E5E7EB"
                 mark = "✅" if is_hit else ""
                 st.markdown(
@@ -795,7 +800,6 @@ with tabs[2]:
             st.caption("Os **votos** contam todo código previsto por cada modelo (não apenas top-k).")
 
             st.divider()
-
         else:
             st.info("Pluralidade: sem votos (não há predições nos modelos).")
 
@@ -809,7 +813,7 @@ with tabs[2]:
             for c, s in sorted_score:
                 is_top = (c in topk_borda)
                 is_hit = (c in set(gold)) if gold else False
-                bg = "#EFF6FF" if is_top else "#F8FAFC"   # azul claro p/ top-k
+                bg = "#EFF6FF" if is_top else "#F8FAFC"
                 br = "#3B82F6" if is_top else "#E5E7EB"
                 mark = "✅" if is_hit else ""
                 st.markdown(

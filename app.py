@@ -12,9 +12,9 @@ st.set_page_config(
     layout="wide"
 )
 
-PRIMARY = "#0F3D7A"   # azul-escuro (SBPO inspired)
-SECOND  = "#246BCE"   # azul-médio
-GRAY    = "#888888"
+PRIMARY = "#0F3D7A"   # Borda
+SECOND  = "#246BCE"   # Pluralidade
+GRAY    = "#B0B0B0"   # individuais (cinza claro)
 BG      = "#FFFFFF"
 
 # ============== HELPERS ==============
@@ -51,14 +51,25 @@ def is_aggregate(modelo: str) -> bool:
     return ("agregado" in m) or ("borda" in m) or ("pluralidade" in m)
 
 def color_for_model(modelo: str) -> str:
-    """Cinzas para individuais; azuis para agregados; Borda/Pluralidade com tons diferentes."""
-    m = modelo.lower()
-    if "borda" in m:
+    """
+    Define cor por tipo de modelo:
+    - Agregado_Borda → azul escuro
+    - Agregado_Pluralidade → azul médio
+    - Outros agregados → azul médio
+    - Individuais (API GPT, Maritalk, Gemini etc.) → cinza claro
+    """
+    m = (
+        str(modelo)
+        .lower()
+        .replace("\u2011", "-")   # hífen não separável
+        .strip()
+    )
+
+    if m.startswith("agregado_borda"):
         return PRIMARY
-    if "plural" in m:  # pluralidade
+    if m.startswith("agregado_plural"):
         return SECOND
-    if "agregado" in m:
-        # fallback de agregado genérico
+    if m.startswith("agregado"):
         return SECOND
     return GRAY
 

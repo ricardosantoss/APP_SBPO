@@ -327,18 +327,7 @@ with tabs[0]:
             )
         )
 
-        # Labels: valor numérico apenas no F1 dos destacados
-        labels = (
-            alt.Chart(df_plot[(df_plot["Agregado"]) & (df_plot["Métrica"] == "F1")])
-            .mark_text(dy=-8, fontSize=12, fontWeight="bold", color="#111")
-            .encode(
-                x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain)),
-                y=alt.Y("Valor:Q"),
-                text=alt.Text("Valor:Q", format=".3f")
-            )
-        )
-
-        chart = (base + overlay + labels)
+        chart = (base + overlay)
         st.altair_chart(chart, use_container_width=True)
 
     except Exception:

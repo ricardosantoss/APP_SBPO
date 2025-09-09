@@ -632,268 +632,197 @@ with tabs[1]:
 with tabs[2]:
     style_title("Exemplos")
 
-    # ---------- helpers (apenas para esta aba) ----------
-    def _to_codes(lst):
-        """Normaliza uma lista de códigos para str/upper, ignora vazios."""
-        out = []
-        for c in (lst or []):
-            s = str(c).strip().upper()
-            if s:
-                out.append(s)
-        return out
+    # ---- Helpers locais desta aba ----
+    def _to_codes(val):
+        # Converte uma célula do JSON para lista de strings
+        if val is None:
+            return []
+        if isinstance(val, (list, tuple)):
+            return [str(x).strip().upper() for x in val]
+        # strings únicas
+        return [str(val).strip().upper()]
 
-    def compute_plurality_all(models_dict, valid_model_keys):
+    def _top_k(seq, k):
+        return list(seq)[:max(0, int(k))]
+
+    def _aggregate_pluralidade(models_dict):
+        """Conta votos por código (todos os códigos de cada modelo contam 1 voto)."""
+        from collections import Counter
+        votes = Counter()
+        for codes in models_dict.values():
+            for c in _to_codes(codes):
+                votes[c] += 1
+        return votes  # Counter
+
+    def _aggregate_borda(models_dict):
         """
-        Pluralidade correta:
-        - Considera TODAS as posições de cada modelo (não só top-k).
-        - 1 voto por modelo por código (duplicata no mesmo modelo conta 1x).
-        Retorna: dict {codigo: votos}, total_modelos
+        Soma posições (Borda) por código:
+          1º = +k_max, 2º = +(k_max-1), ... até 1
+        *Importante*: somamos sobre TODAS as posições disponíveis em cada modelo.
         """
         from collections import defaultdict
-        votes = defaultdict(int)
-        for mk in valid_model_keys:
-            seen = set()
-            for code in _to_codes(models_dict.get(mk, [])):
-                if code in seen:
-                    continue
-                seen.add(code)
-                votes[code] += 1
-        return dict(votes), len(valid_model_keys)
+        score = defaultdict(int)
+        # usamos um k_max "grande" local para gerar pesos decrescentes estáveis
+        # mas o peso real por posição é baseado no tamanho da lista do próprio modelo
+        for codes in models_dict.values():
+            lst = _to_codes(codes)
+            n = len(lst)
+            # pesos de Borda: n, n-1, ..., 1
+            for i, code in enumerate(lst):
+                weight = n - i
+                score[code] += weight
+        return score  # dict
 
-    def compute_borda_all(models_dict, valid_model_keys):
-        """
-        Borda correta:
-        - Considera TODAS as posições (não só top-k).
-        - Peso por posição i (0-based) numa lista de tamanho n: (n - i).
-        - Duplicata no mesmo modelo conta 1x (primeira ocorrência).
-        Retorna: dict {codigo: soma_pesos}
-        """
-        from collections import defaultdict
-        scores = defaultdict(int)
-        for mk in valid_model_keys:
-            seq = _to_codes(models_dict.get(mk, []))
-            seen = set()
-            n = len(seq)
-            for i, code in enumerate(seq):
-                if code in seen:
-                    continue
-                seen.add(code)
-                scores[code] += max(n - i, 0)
-        return dict(scores)
-
-    def is_noise_model(raw_key: str) -> bool:
-        """
-        Filtra colunas 'que não são modelos' para a UI de exemplos.
-        Exclui textos longos e versões duplicadas (ex.: *_3char) e o Tunado.
-        """
-        m = _norm(raw_key)
-        if "evolucao" in m or "evolução" in raw_key.lower():
-            return True
-        if m.endswith("_3char"):
-            return True
-        if "cid de alta" in m:
-            return True
-        if "tunado" in m or "modelo tunado" in m:
-            return True
-        return False
-
-    def render_codes_list(codes, k_sel, gold_set=None):
-        """
-        Renderiza uma listinha horizontal com destaque nos top-k.
-        Tudo aparece; top-k ficam com 'pill' + borda, os demais normais.
-        Ouro (se vier) recebe moldura.
-        """
-        gold_set = gold_set or set()
-        pills = []
-        for i, c in enumerate(codes):
-            is_top = (i < k_sel)
-            is_gold = (c in gold_set)
-            bg = "#EEF6FF" if is_top else "#F8FAFC"
-            bd = f"2px solid {SECOND}" if is_top else "1px solid #E5E7EB"
-            sh = "0 0 0 2px #34D399 inset" if is_gold else "none"
-            pills.append(
-                f"<span style='display:inline-block;margin:4px 6px 0 0;padding:6px 10px;"
-                f"border-radius:999px;background:{bg};border:{bd};box-shadow:{sh};"
-                f"font-size:0.9rem;color:#111;'>{c}</span>"
-            )
-        st.markdown("<div>"+ "".join(pills) +"</div>", unsafe_allow_html=True)
-
-    # ---------- carrega examples.json ----------
-    try:
-        examples = load_json(os.path.join(DATA_DIR, "examples.json"))
-        if not isinstance(examples, list) or not examples:
-            raise ValueError("examples.json vazio ou malformado.")
-    except Exception as e:
-        st.error(f"Não consegui carregar examples.json: {e}")
+    # ----- Escolha do caso -----
+    if not examples:
+        st.info("Nenhum exemplo encontrado (examples.json).")
         st.stop()
 
-    # ---------- seleção do caso ----------
-    options = []
-    for e in examples:
-        eid = e.get("id", "sem-id")
-        tipo = e.get("tipo", "?")
-        ks = e.get("k", "")
-        try:
-            ks = int(ks)
-        except Exception:
-            pass
-        options.append(f"{eid}  •  tipo={tipo}  •  k={ks}")
+    case_ids = [ex.get("id", f"case-{i+1}") for i, ex in enumerate(examples)]
+    csel, kcol, tcol = st.columns([3, 1, 1])
+    with csel:
+        case_idx = st.selectbox("Caso", options=list(range(len(examples))),
+                                format_func=lambda i: case_ids[i], index=0)
 
-    case_choice = st.selectbox("Escolha um caso", options, index=0)
-    ex_idx = options.index(case_choice)
-    ex = examples[ex_idx]
+    # k SEMPRE entre 1 e 10 (fixo)
+    with kcol:
+        k_sel = st.slider("k (top-k a destacar)", min_value=1, max_value=10, value=5, step=1)
 
-    tipo_ex = str(ex.get("tipo", "")).strip()
-    gold_list = _to_codes(ex.get("gold", []))
-    gold_set  = set(gold_list)
-    models_dict = ex.get("models", {}) or {}
+    with tcol:
+        tipo_ex = examples[case_idx].get("tipo", "3char")
+        st.text_input("Tipo", value=str(tipo_ex), disabled=True)
 
-    # ---------- seleção de k ----------
-    try:
-        k_default = int(ex.get("k", 5))
-        if k_default < 1:
-            k_default = 5
-    except Exception:
-        k_default = 5
+    ex = examples[case_idx]
+    gold = _to_codes(ex.get("gold", []))
+    texto = ex.get("texto", "")
+    models_raw = ex.get("models", {}) or {}
 
-    # um k máximo razoável: maior top entre modelos, limitado a 20
-    max_len_models = 0
-    for v in models_dict.values():
-        max_len_models = max(max_len_models, len(_to_codes(v)))
-    k_max = max(1, min(20, max_len_models if max_len_models > 0 else 10))
-
-    k_sel = st.slider("k (apenas para destaque visual)", min_value=1, max_value=k_max, value=min(k_default, k_max), step=1,
-                      help="Usado só para destacar visualmente top-k. As somas de Pluralidade/Borda consideram TODAS as posições.")
-
-    # ---------- seleção dos modelos incluídos no cálculo ----------
-    # mapeia -> nome bonito e filtra ruído
-    candidates = []
-    for raw_key in models_dict.keys():
-        if is_noise_model(raw_key):
+    # Remover "modelo tunado" se houver (pelo nome)
+    filtered_models = {}
+    for raw_name, preds in models_raw.items():
+        nrm = unicodedata.normalize("NFKD", str(raw_name)).encode("ascii", "ignore").decode("ascii").lower()
+        if "tunado" in nrm:
             continue
-        candidates.append((pretty_model_name(raw_key), raw_key))
+        filtered_models[raw_name] = preds
+    models_raw = filtered_models
 
-    # ordena por nome bonito
-    candidates = sorted(candidates, key=lambda x: x[0])
+    # Mostrar ouro/texto (se houver)
+    with st.expander("Detalhes do caso", expanded=False):
+        st.write("**Gold (CID)**:", ", ".join(gold) if gold else "—")
+        if texto:
+            st.write("**Texto**:", texto)
 
-    # sugestões: individuais “clássicos”
-    preferred = ["GPT-4o", "Deep-Seek V-3", "Sabia 3.1", "Gemini 1.5 Flash", "GPT 4o-Mini"]
-    default_selected = []
-    pretties = [p for p, _ in candidates]
-    for name in preferred:
-        if name in pretties:
-            default_selected.append(name)
-    if not default_selected and pretties:
-        default_selected = pretties[:min(5, len(pretties))]
+    # ----- Colunas: à esquerda cada modelo, à direita os agregados -----
+    col_left, col_right = st.columns([1.2, 1], gap="large")
 
-    st.markdown("#### Modelos considerados")
-    chosen_pretty = st.multiselect(
-        "Selecione os modelos a incluir no cálculo dos agregados:",
-        options=pretties,
-        default=default_selected
-    )
-    # traduz de volta para chaves cruas na mesma ordem exibida
-    chosen_raw = [raw for p, raw in candidates if p in chosen_pretty]
+    # ---------- ESQUERDA: modelos individuais ----------
+    with col_left:
+        style_subtitle("Modelos (todas as predições; destaque = top-k)")
 
-    if not chosen_raw:
-        st.info("Selecione pelo menos um modelo para calcular Pluralidade e Borda.")
-        st.stop()
+        # Ordenar por nome bonito (se tiver pretty_model_name)
+        def _pretty(m):
+            try:
+                return pretty_model_name(m)
+            except Exception:
+                return str(m)
 
-    st.divider()
-
-    # ================== layout: esquerda (modelos) | direita (agregados) ==================
-    colL, colR = st.columns([1, 1])
-
-    # ----------- ESQUERDA: códigos por modelo (todos, com top-k destacado) -----------
-    with colL:
-        style_subtitle("Modelos (todos os códigos; top-k apenas destacado)")
-        for p_name, raw_key in candidates:
-            if raw_key not in chosen_raw:
-                continue
-            codes = _to_codes(models_dict.get(raw_key, []))
-            with st.expander(p_name, expanded=False):
-                if not codes:
-                    st.caption("Sem códigos para este modelo.")
-                else:
-                    render_codes_list(codes, k_sel, gold_set=gold_set)
-
-    # ----------- DIREITA: agregados (pluralidade/borda) -----------
-    with colR:
-        style_subtitle("Agregados (considerando TODAS as posições)")
-        # gold chips
-        if gold_list:
-            chip("Ouro", ", ".join(gold_list), bg=SECOND)
-
-        # calcula agregados a partir dos modelos SELECIONADOS
-        votes_plural, n_models = compute_plurality_all(models_dict, chosen_raw)
-        scores_borda = compute_borda_all(models_dict, chosen_raw)
-
-        # organiza top-k só para destaque visual
-        topk_plural = sorted(votes_plural.items(), key=lambda x: x[1], reverse=True)[:k_sel]
-        topk_borda  = sorted(scores_borda.items(), key=lambda x: x[1], reverse=True)[:k_sel]
-        set_topk_plural = {c for c, _ in topk_plural}
-        set_topk_borda  = {c for c, _ in topk_borda}
-
-        # ---- Pluralidade: tabela completa (todos os códigos)
-        st.markdown("##### Pluralidade (votos por código)")
-        if votes_plural:
-            df_pl = (
-                pd.DataFrame([{"Código": c, "Votos": v} for c, v in votes_plural.items()])
-                .sort_values(["Votos", "Código"], ascending=[False, True])
-                .reset_index(drop=True)
-            )
-            # destaque visual (sem número extra no chip)
-            def _fmt_plural(row):
-                c = row["Código"]
-                is_top = c in set_topk_plural
-                is_gold = c in gold_set
-                base = f"<span style='padding:4px 8px;border-radius:999px;border:1px solid #E5E7EB;background:#F8FAFC;'>{c}</span>"
-                if is_top:
-                    base = f"<span style='padding:4px 8px;border-radius:999px;border:2px solid {SECOND};background:#EEF6FF;font-weight:600;'>{c}</span>"
-                if is_gold:
-                    base = base.replace("'>", "' style='box-shadow:0 0 0 2px #34D399 inset;'>")
-                return base
-
-            df_pl["_Codigo_"] = df_pl.apply(_fmt_plural, axis=1)
-            st.caption(f"Modelos considerados: {n_models}")
-            st.markdown(
-                df_pl.to_html(escape=False, index=False, justify='left',
-                              columns=["_Codigo_", "Votos"]).replace("_Codigo_", "Código"),
-                unsafe_allow_html=True
-            )
+        items = sorted(models_raw.items(), key=lambda kv: _pretty(kv[0]))
+        if not items:
+            st.info("Sem modelos neste exemplo.")
         else:
-            st.caption("Sem votos (lista vazia).")
+            for raw_name, preds in items:
+                pretty = _pretty(raw_name)
+                codes_all = _to_codes(preds)
+                topk_set = set(_top_k(codes_all, k_sel))
 
-        st.divider()
+                # badge do modelo
+                st.markdown(
+                    f"<div style='display:inline-block;padding:6px 10px;border-radius:999px;"
+                    f"background:{SECOND};color:#fff;font-weight:600;margin:8px 0;'>"
+                    f"{pretty}</div>",
+                    unsafe_allow_html=True
+                )
 
-        # ---- Borda: tabela completa (todos os códigos)
-        st.markdown("##### Borda (soma de pesos por código)")
-        if scores_borda:
-            df_bd = (
-                pd.DataFrame([{"Código": c, "Soma de pesos": s} for c, s in scores_borda.items()])
-                .sort_values(["Soma de pesos", "Código"], ascending=[False, True])
-                .reset_index(drop=True)
-            )
+                if not codes_all:
+                    st.caption("— sem predições —")
+                    continue
 
-            def _fmt_borda(row):
-                c = row["Código"]
-                is_top = c in set_topk_borda
-                is_gold = c in gold_set
-                base = f"<span style='padding:4px 8px;border-radius:999px;border:1px solid #E5E7EB;background:#F8FAFC;'>{c}</span>"
-                if is_top:
-                    base = f"<span style='padding:4px 8px;border-radius:999px;border:2px solid {PRIMARY};background:#EEF2FF;font-weight:600;'>{c}</span>"
-                if is_gold:
-                    base = base.replace("'>", "' style='box-shadow:0 0 0 2px #34D399 inset;'>")
-                return base
+                # listar TODOS os códigos, marcando os que caem no top-k desse modelo
+                # e marcando se batem o gold
+                for i, c in enumerate(codes_all, start=1):
+                    is_top = (c in topk_set)
+                    is_hit = (c in set(gold)) if gold else False
+                    bg = "#FFF7ED" if is_top else "#F8FAFC"  # top-k = levemente destacado
+                    br = "#F59E0B" if is_top else "#E5E7EB"
+                    mark = "✅" if is_hit else ""
+                    st.markdown(
+                        f"<div style='padding:6px 10px;margin:2px 0;border-radius:10px;"
+                        f"background:{bg};border:1px solid {br};'>"
+                        f"<span style='font-weight:600;margin-right:6px;'>{i:02d}.</span> {c} {mark}"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
 
-            df_bd["_Codigo_"] = df_bd.apply(_fmt_borda, axis=1)
-            st.markdown(
-                df_bd.to_html(escape=False, index=False, justify='left',
-                              columns=["_Codigo_", "Soma de pesos"]).replace("_Codigo_", "Código"),
-                unsafe_allow_html=True
-            )
+                st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+
+    # ---------- DIREITA: agregados ----------
+    with col_right:
+        style_subtitle("Agregados (usam TODAS as predições)")
+
+        # 1) Pluralidade: votos por código
+        votes = _aggregate_pluralidade(models_raw)
+        if votes:
+            # Ordenar por contagem desc
+            sorted_votes = sorted(votes.items(), key=lambda x: (-x[1], x[0]))
+            topk_plural = set([c for c, _ in sorted_votes[:k_sel]])
+
+            st.markdown("**Pluralidade (votos por código)**")
+            for c, v in sorted_votes:
+                is_top = (c in topk_plural)
+                is_hit = (c in set(gold)) if gold else False
+                # destaque leve nos top-k do agregado
+                bg = "#ECFDF5" if is_top else "#F8FAFC"   # verde claro p/ top-k
+                br = "#10B981" if is_top else "#E5E7EB"
+                mark = "✅" if is_hit else ""
+                st.markdown(
+                    f"<div style='padding:8px 10px;margin:3px 0;border-radius:10px;"
+                    f"background:{bg};border:1px solid {br};'>"
+                    f"<span style='font-weight:700;'>[{v}]</span> {c} {mark}"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+
+            st.caption("Os **votos** contam todo código previsto por cada modelo (não apenas top-k).")
+
+            st.divider()
+
         else:
-            st.caption("Sem somas (lista vazia).")
+            st.info("Pluralidade: sem votos (não há predições nos modelos).")
 
-    st.caption("Notas: top-k é apenas destaque visual. Os cálculos de Pluralidade/Borda usam TODAS as posições das listas.")
+        # 2) Borda: soma de pesos por posição (todas as posições)
+        score = _aggregate_borda(models_raw)
+        if score:
+            sorted_score = sorted(score.items(), key=lambda x: (-x[1], x[0]))
+            topk_borda = set([c for c, _ in sorted_score[:k_sel]])
+
+            st.markdown("**Borda (soma de pesos por posição)**")
+            for c, s in sorted_score:
+                is_top = (c in topk_borda)
+                is_hit = (c in set(gold)) if gold else False
+                bg = "#EFF6FF" if is_top else "#F8FAFC"   # azul claro p/ top-k
+                br = "#3B82F6" if is_top else "#E5E7EB"
+                mark = "✅" if is_hit else ""
+                st.markdown(
+                    f"<div style='padding:8px 10px;margin:3px 0;border-radius:10px;"
+                    f"background:{bg};border:1px solid {br};'>"
+                    f"<span style='font-weight:700;'>[{s}]</span> {c} {mark}"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+
+            st.caption("A **soma de Borda** usa todas as posições previstas por cada modelo: "
+                       "1º vale N, 2º vale N-1, ..., até 1 (onde N é o tamanho da lista daquele modelo).")
+        else:
+            st.info("Borda: sem pontuações (não há predições nos modelos).")
+
 

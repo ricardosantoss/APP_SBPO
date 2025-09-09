@@ -13,11 +13,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# Paleta (cores por MÉTRICA)
-COLOR_PREC = "#5DA3F2"   # Precisão  (azul claro)
-COLOR_REC  = "#0F3D7A"   # Recall    (azul escuro)
-COLOR_F1   = "#246BCE"   # F1        (azul médio)
-PRIMARY    = "#0F3D7A"   # para títulos e chips
+# Paleta (cores bem distintas por MÉTRICA)
+COLOR_PREC = "#F59E0B"   # Precisão  (laranja)
+COLOR_REC  = "#10B981"   # Recall    (verde)
+COLOR_F1   = "#3B82F6"   # F1        (azul)
+PRIMARY    = "#0F3D7A"   # títulos e chips
 SECOND     = "#246BCE"
 
 # ================== HELPERS ==================
@@ -124,6 +124,36 @@ def best_individual_delta(df_slice: pd.DataFrame, f1_col: str):
     delta_plural = (None if val_plural is None else (val_plural - best_val))
     return (best_name, best_val, val_borda, val_plural, delta_borda, delta_plural)
 
+# -------- nomes bonitos para exibição --------
+def pretty_model_name(raw: str) -> str:
+    """
+    Converte rótulos do CSV para os nomes desejados para exibição:
+      GPT-4o
+      Deep-Seek V-3
+      Sabia 3.1
+      Pluralidade
+      Borda
+      Gemini 1.5 Flash
+      GPT 4o-Mini
+    """
+    m = _norm(raw).replace("\u2011", "-")  # normaliza
+    # Agregados primeiro
+    if "borda" in m: return "Borda"
+    if "plural" in m: return "Pluralidade"
+    # Modelos
+    if "4o-mini" in m or "gpt-4o-mini" in m or "gpt 4o-mini" in m:
+        return "GPT 4o-Mini"
+    if "gpt-4o" in m or "gpt 4o" in m:
+        return "GPT-4o"
+    if "deep" in m and "seek" in m:
+        return "Deep-Seek V-3"
+    if "sabi" in m:   # cobre "sabia" e "sabiá"
+        return "Sabia 3.1"
+    if "gemini" in m and "flash" in m:
+        return "Gemini 1.5 Flash"
+    # fallback: mantém original
+    return str(raw).strip()
+
 def style_title(txt: str):
     st.markdown(f"<h2 style='margin-top:0.25rem;color:{PRIMARY};'>{txt}</h2>", unsafe_allow_html=True)
 
@@ -202,13 +232,15 @@ with tabs[0]:
     # Ordena por F1 para ficar confortável
     view = view.sort_values(metric_cols["f1"], ascending=False)
 
-    # Tabela (opcional)
+    # Tabela (opcional) com nomes bonitos
     with st.expander("Ver tabela de resultados (ordenada)", expanded=False):
         cols_to_show = ["Modelo", metric_cols["precision"], metric_cols["recall"], metric_cols["f1"]]
         for extra in ["TP","FP","FN"]:
             if extra in view.columns:
                 cols_to_show.append(extra)
-        df_show = view[cols_to_show].rename(columns={
+        df_show = view[cols_to_show].copy()
+        df_show["Modelo"] = df_show["Modelo"].apply(pretty_model_name)
+        df_show = df_show.rename(columns={
             metric_cols["precision"]: f"{agg_choice}_Precisão",
             metric_cols["recall"]:    f"{agg_choice}_Recall",
             metric_cols["f1"]:        f"{agg_choice}_F1"
@@ -218,13 +250,13 @@ with tabs[0]:
     # Prepara dados no formato tidy para gráfico (3 linhas por modelo)
     plot_rows = []
     for _, r in view.iterrows():
-        modelo = str(r["Modelo"])
+        modelo = pretty_model_name(str(r["Modelo"]))
         plot_rows.append({"Modelo": modelo, "Métrica": "Precisão", "Valor": float(r[metric_cols["precision"]])})
         plot_rows.append({"Modelo": modelo, "Métrica": "Recall",   "Valor": float(r[metric_cols["recall"]])})
         plot_rows.append({"Modelo": modelo, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
     df_plot = pd.DataFrame(plot_rows)
 
-    # --- Gráfico: barras agrupadas (3 por modelo) ---
+    # --- Gráfico: barras agrupadas (3 por modelo), com rótulos maiores ---
     try:
         import altair as alt
 
@@ -243,9 +275,10 @@ with tabs[0]:
                     axis=alt.Axis(
                         title=None,
                         labelAngle=0,
-                        labelFontSize=13,   # 👈 nome do modelo maior
+                        labelFontSize=14,   # nome do modelo maior
                         labelColor="#222"
-                    )
+                    ),
+                    sort=None
                 ),
                 y=alt.Y("Valor:Q", title=f"{agg_choice} (valor)"),
                 color=alt.Color(
@@ -256,10 +289,10 @@ with tabs[0]:
                     ),
                     legend=alt.Legend(title="Métrica")
                 ),
-                xOffset="Métrica:N",   # 👈 agrupa 3 barras por modelo
+                xOffset="Métrica:N",   # agrupa 3 barras por modelo
                 tooltip=["Modelo", "Métrica", "Valor"]
             )
-            .properties(height=440)
+            .properties(height=460)
         )
 
         st.altair_chart(chart, use_container_width=True)
@@ -273,7 +306,7 @@ with tabs[0]:
     if info:
         best_name, best_val, val_borda, val_plural, d_borda, d_plural = info
         style_subtitle("Δ vs. melhor modelo individual (pela F1)")
-        chip("Melhor Individual", f"{best_name} ({best_val:.4f})", bg=PRIMARY)
+        chip("Melhor Individual", f"{pretty_model_name(best_name)} ({best_val:.4f})", bg=PRIMARY)
         if val_borda is not None:
             chip("Borda", f"{val_borda:.4f} ({'+' if d_borda>=0 else ''}{d_borda:.4f})", bg=PRIMARY)
         if val_plural is not None:
@@ -332,7 +365,7 @@ with tabs[1]:
                 .strip()
             )
             rows.append({
-                "Modelo": modelo_norm,
+                "Modelo": pretty_model_name(modelo_norm),
                 "Média (len preds)": d.get("media", 0),
                 "Mediana": d.get("mediana", 0),
                 "Desvio": d.get("desvio", 0),
@@ -352,3 +385,4 @@ with tabs[1]:
             f"export={meta.get('data_export','?')} • "
             f"versões={meta.get('versoes',{})}"
         )
+

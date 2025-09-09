@@ -32,11 +32,23 @@ import pandas as pd
 import streamlit as st
 
 # ================== CONFIG DA PÁGINA ==================
+# ================== CONFIG DA PÁGINA ==================
 st.set_page_config(
     page_title="CID-10 • Ensemble",
     page_icon="🧠",
     layout="wide"
 )
+
+# INJETAR CÓDIGO PARA PWA E ESTILOS DE TABLET
+pwa_code = """
+    <link rel="manifest" href="manifest.json">
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js');
+        }
+    </script>
+"""
+st.markdown(pwa_code, unsafe_allow_html=True)
 
 # Paleta (cores bem distintas por MÉTRICA)
 # Paleta (cores VIVAS e bem distintas por MÉTRICA)

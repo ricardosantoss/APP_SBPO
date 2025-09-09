@@ -661,25 +661,29 @@ with tabs[2]:
             return default
 
     def _as_list(x):
-        return x if isinstance(x, (list, tuple)) else []
+        if isinstance(x, (list, tuple)):
+            return list(x)
+        if x is None:
+            return []
+        # se vier string única, vira lista de um
+        return [x]
 
     def _is_noise_key(raw_name: str) -> bool:
-        """Chaves que não são modelos (ex.: 3char auxiliares, 'CID de Alta', evoluções etc.)."""
+        """Chaves auxiliares/ruído (não são modelos)."""
         n = _norm(raw_name)
         return (
             "_3char" in n
             or " 3char" in n
-            or n.startswith("21.")             # casos do tipo '21. CID de Alta_3char'
+            or n.startswith("21.")             # '21. CID de Alta_3char'
             or "cid de alta" in n
             or "cid_de_alta" in n
             or "evolucao" in n or "evolução" in raw_name.lower()
         )
 
-    def _is_agregado(raw_name: str) -> bool:
-        """Detecção robusta de agregados (Borda/Pluralidade)."""
-        n = _norm(raw_name).replace("\u2011", "-")
-        # cobre 'borda', 'plural', 'pluralidade' e variações
-        return ("borda" in n) or ("plural" in n)
+    def _is_agregado(raw_or_pretty: str) -> bool:
+        """Detecção robusta de agregados."""
+        n = _norm(raw_or_pretty).replace("\u2011", "-")
+        return ("borda" in n) or ("plural" in n) or ("pluralidade" in n)
 
     # --------- seletor do caso ---------
     case_labels = [_case_label(e, i) for i, e in enumerate(EXAMPLES)]
@@ -695,47 +699,61 @@ with tabs[2]:
 
     k_sel = st.number_input("k (top-k)", min_value=1, max_value=20, value=k_default, step=1)
 
-    # mostra texto se existir
     if texto:
         with st.expander("Texto do caso"):
             st.write(texto)
 
-    # --------- renderização dos modelos ---------
+    # --------- modelos do caso ---------
     models_dict = ex.get("models", {}) or {}
     if not models_dict:
         st.warning("Nenhum modelo encontrado neste exemplo.")
         st.stop()
 
-    # Limpa ruídos e normaliza nomes já no dicionário
-    cleaned_items = []
-    for raw_name, preds in models_dict.items():
-        if _is_noise_key(raw_name):
-            continue
-        pretty = pretty_model_name(raw_name)
-        cleaned_items.append((pretty, preds, raw_name))  # guarda também o raw
-
-    if not cleaned_items:
-        st.warning("Nenhum modelo válido após limpeza de chaves auxiliares.")
-        st.stop()
-
-    # separa individuais e agregados (com base no RAW para detecção, mas exibe PRETTY)
+    # Normaliza/inspeciona todas as chaves e separa INDIVIDUAIS x AGREGADOS
+    inspected = []  # para debug
     ind_models = []
     agg_models = []
-    for pretty, preds, raw in cleaned_items:
-        if _is_agregado(raw) or _is_agregado(pretty):
-            agg_models.append((pretty, preds))
-        else:
-            ind_models.append((pretty, preds))
 
-    # Ordena por nome para consistência visual
+    for raw_name, preds in models_dict.items():
+        pretty = pretty_model_name(raw_name)
+
+        # 1) se é agregado (por raw OU por pretty), entra SEMPRE (não passa no filtro de ruído)
+        if _is_agregado(raw_name) or _is_agregado(pretty):
+            agg_models.append((pretty, _as_list(preds), raw_name))
+            inspected.append({
+                "raw": raw_name, "pretty": pretty,
+                "is_agregado": True, "is_noise": False
+            })
+            continue
+
+        # 2) se for ruído, pula
+        noise = _is_noise_key(raw_name)
+        if noise:
+            inspected.append({
+                "raw": raw_name, "pretty": pretty,
+                "is_agregado": False, "is_noise": True
+            })
+            continue
+
+        # 3) caso normal: individual
+        ind_models.append((pretty, _as_list(preds), raw_name))
+        inspected.append({
+            "raw": raw_name, "pretty": pretty,
+            "is_agregado": False, "is_noise": False
+        })
+
+    # DEBUG: ver o que foi detectado
+    with st.expander("Ver chaves detectadas (debug)"):
+        st.write(pd.DataFrame(inspected))
+
+    # Ordena alfabeticamente para consistência visual
     ind_models = sorted(ind_models, key=lambda x: x[0])
     agg_models = sorted(agg_models, key=lambda x: x[0])
 
-    # normalização para comparação
+    # Conjunto ouro normalizado para “acertos@k”
     gold_norm = set([_norm(c) for c in gold])
 
     def render_preds(name, preds):
-        preds = _as_list(preds)
         topk = preds[:k_sel]
         hits = [c for c in topk if _norm(c) in gold_norm]
         acc = 100.0 * len(hits) / max(1, len(gold_norm))
@@ -752,14 +770,14 @@ with tabs[2]:
         st.markdown(f"**{name}** — acertos@{k_sel}: {len(hits)}/{max(1,len(gold_norm))} ({acc:.1f}%)", unsafe_allow_html=True)
         st.markdown(" ".join(chips) if chips else "—", unsafe_allow_html=True)
 
-    # layout: esquerda modelos individuais, direita agregados
+    # layout: esquerda individuais, direita agregados
     colL, colR = st.columns(2)
     with colL:
         style_subtitle("Modelos")
         if not ind_models:
             st.info("Sem modelos individuais neste caso.")
         else:
-            for nm, preds in ind_models:
+            for nm, preds, _raw in ind_models:
                 render_preds(nm, preds)
 
     with colR:
@@ -767,6 +785,5 @@ with tabs[2]:
         if not agg_models:
             st.warning("Nenhum agregado (Borda/Pluralidade) presente neste caso.")
         else:
-            for nm, preds in agg_models:
+            for nm, preds, _raw in agg_models:
                 render_preds(nm, preds)
-

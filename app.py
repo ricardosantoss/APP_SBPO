@@ -20,6 +20,18 @@ COLOR_F1   = "#3B82F6"   # F1        (azul)
 PRIMARY    = "#0F3D7A"   # títulos e chips
 SECOND     = "#246BCE"
 
+# Ordem fixa de exibição (Dashboard)
+ORDER_MODELOS = [
+    "GPT-4o",
+    "Deep-Seek V-3",
+    "Sabia 3.1",
+    "Pluralidade",
+    "Borda",
+    "Gemini 1.5 Flash",
+    "GPT 4o-Mini",
+]
+HIGHLIGHT = {"Borda", "Pluralidade"}
+
 # ================== HELPERS ==================
 def _norm(s: str) -> str:
     """normaliza string (minúsculas, sem acento) para casar nomes/labels."""
@@ -128,13 +140,7 @@ def best_individual_delta(df_slice: pd.DataFrame, f1_col: str):
 def pretty_model_name(raw: str) -> str:
     """
     Converte rótulos do CSV para os nomes desejados para exibição:
-      GPT-4o
-      Deep-Seek V-3
-      Sabia 3.1
-      Pluralidade
-      Borda
-      Gemini 1.5 Flash
-      GPT 4o-Mini
+      GPT-4o • Deep-Seek V-3 • Sabia 3.1 • Pluralidade • Borda • Gemini 1.5 Flash • GPT 4o-Mini
     """
     m = _norm(raw).replace("\u2011", "-")  # normaliza
     # Agregados primeiro
@@ -255,30 +261,28 @@ with tabs[0]:
         plot_rows.append({"Modelo": modelo, "Métrica": "Recall",   "Valor": float(r[metric_cols["recall"]])})
         plot_rows.append({"Modelo": modelo, "Métrica": "F1",       "Valor": float(r[metric_cols["f1"]])})
     df_plot = pd.DataFrame(plot_rows)
+    df_plot["Agregado"] = df_plot["Modelo"].isin(HIGHLIGHT)
 
-    # --- Gráfico: barras agrupadas (3 por modelo), com rótulos maiores ---
+    # --- Gráfico: barras agrupadas (3 por modelo) com destaque nos agregados ---
     try:
         import altair as alt
 
-        METRIC_COLORS = {
-            "Precisão": COLOR_PREC,
-            "Recall": COLOR_REC,
-            "F1": COLOR_F1
-        }
+        METRIC_COLORS = {"Precisão": COLOR_PREC, "Recall": COLOR_REC, "F1": COLOR_F1}
 
-        chart = (
+        # Base: todos os modelos com opacidade menor
+        base = (
             alt.Chart(df_plot)
             .mark_bar()
             .encode(
                 x=alt.X(
                     "Modelo:N",
+                    scale=alt.Scale(domain=ORDER_MODELOS),
                     axis=alt.Axis(
                         title=None,
                         labelAngle=0,
                         labelFontSize=14,   # nome do modelo maior
                         labelColor="#222"
-                    ),
-                    sort=None
+                    )
                 ),
                 y=alt.Y("Valor:Q", title=f"{agg_choice} (valor)"),
                 color=alt.Color(
@@ -290,11 +294,43 @@ with tabs[0]:
                     legend=alt.Legend(title="Métrica")
                 ),
                 xOffset="Métrica:N",   # agrupa 3 barras por modelo
-                tooltip=["Modelo", "Métrica", "Valor"]
+                opacity=alt.condition(alt.datum.Agregado == True, alt.value(1.0), alt.value(0.45)),
+                tooltip=["Modelo", "Métrica", alt.Tooltip("Valor:Q", format=".4f")]
             )
             .properties(height=460)
         )
 
+        # Overlay: só Borda/Pluralidade com contorno
+        overlay = (
+            alt.Chart(df_plot[df_plot["Agregado"]])
+            .mark_bar(stroke="#111", strokeWidth=2)
+            .encode(
+                x=alt.X("Modelo:N", scale=alt.Scale(domain=ORDER_MODELOS), axis=alt.Axis(title=None)),
+                y=alt.Y("Valor:Q"),
+                color=alt.Color(
+                    "Métrica:N",
+                    scale=alt.Scale(
+                        domain=list(METRIC_COLORS.keys()),
+                        range=[METRIC_COLORS[m] for m in METRIC_COLORS]
+                    ),
+                    legend=None
+                ),
+                xOffset="Métrica:N",
+            )
+        )
+
+        # Labels: valor numérico apenas no F1 dos destacados
+        labels = (
+            alt.Chart(df_plot[(df_plot["Agregado"]) & (df_plot["Métrica"] == "F1")])
+            .mark_text(dy=-8, fontSize=12, fontWeight="bold", color="#111")
+            .encode(
+                x=alt.X("Modelo:N", scale=alt.Scale(domain=ORDER_MODELOS)),
+                y=alt.Y("Valor:Q"),
+                text=alt.Text("Valor:Q", format=".3f")
+            )
+        )
+
+        chart = (base + overlay + labels)
         st.altair_chart(chart, use_container_width=True)
 
     except Exception:
@@ -385,4 +421,3 @@ with tabs[1]:
             f"export={meta.get('data_export','?')} • "
             f"versões={meta.get('versoes',{})}"
         )
-

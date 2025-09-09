@@ -310,7 +310,7 @@ with tabs[0]:
 
         METRIC_COLORS = {"Precisão": COLOR_PREC, "Recall": COLOR_REC, "F1": COLOR_F1}
 
-        # Base: todos os modelos com cores vivas
+        # Base: todos os modelos com opacidade menor
         base = (
             alt.Chart(df_plot)
             .mark_bar()
@@ -330,21 +330,28 @@ with tabs[0]:
                     legend=alt.Legend(title="Métrica")
                 ),
                 xOffset="Métrica:N",
-                # REMOVIDO: A linha de opacidade foi retirada para que todas as barras fiquem vivas
+                opacity=alt.condition(alt.datum.Agregado == True, alt.value(1.0), alt.value(0.45)),
                 tooltip=["Modelo", "Métrica", alt.Tooltip("Valor:Q", format=".4f")]
             )
             .properties(height=460)
         )
 
-        # Overlay: Usa APENAS o contorno para destacar Borda/Pluralidade
+        # Overlay: só Borda/Pluralidade com contorno
         overlay = (
             alt.Chart(df_plot[df_plot["Agregado"]])
-            .mark_bar(stroke="#111", strokeWidth=2, filled=False) # Adicionado filled=False para garantir que só o contorno seja desenhado
+            .mark_bar(stroke="#111", strokeWidth=2)
             .encode(
                 x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain), axis=alt.Axis(title=None)),
                 y=alt.Y("Valor:Q"),
-                xOffset="Métrica:N", # Garante alinhamento do contorno
-                # A cor aqui não é necessária, pois a barra já foi desenhada no `base`
+                color=alt.Color(
+                    "Métrica:N",
+                    scale=alt.Scale(
+                        domain=list(METRIC_COLORS.keys()),
+                        range=[METRIC_COLORS[m] for m in METRIC_COLORS]
+                    ),
+                    legend=None
+                ),
+                xOffset="Métrica:N",
             )
         )
         
@@ -352,13 +359,11 @@ with tabs[0]:
         text = base.mark_text(
             align='center',
             baseline='bottom',
-            dy=-5,
+            dy=-5,  # Deslocamento vertical
             fontSize=11
         ).encode(
-            text=alt.Text('Valor:Q', format='.3f'),
-            color=alt.value('black'),
-            # ADICIONADO: O mesmo xOffset das barras para centralizar o texto perfeitamente
-            xOffset="Métrica:N",
+            text=alt.Text('Valor:Q', format='.3f'), # Formato com 3 casas decimais
+            color=alt.value('black')
         )
 
         # Une tudo: o gráfico base, o contorno de destaque e os rótulos
@@ -860,5 +865,3 @@ with tabs[2]:
                        "1º vale N, 2º vale N-1, ..., até 1 (onde N é o tamanho da lista daquele modelo).")
         else:
             st.info("Borda: sem pontuações (não há predições nos modelos).")
-
-

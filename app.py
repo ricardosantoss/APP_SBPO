@@ -357,9 +357,26 @@ with tabs[0]:
         chart = (base + overlay)
         st.altair_chart(chart, use_container_width=True)
 
-        # Ordena os modelos pelo F1-Score (decrescente) para o eixo X
-    df_f1_scores = df_plot[df_plot["Métrica"] == "F1"].sort_values("Valor", ascending=False)
-    order_domain = df_f1_scores["Modelo"].tolist()
+    # (Dentro do with tabs[0]:, depois de definir `base` e `overlay`)
+
+# --- Adiciona os RÓTULOS (texto) no topo das barras ---
+text = base.mark_text(
+    align='center',
+    baseline='bottom',
+    dy=-5,  # Deslocamento vertical para ficar um pouco acima da barra
+    fontSize=11
+).encode(
+    text=alt.Text('Valor:Q', format='.3f'), # Formata para 3 casas decimais
+    color=alt.value('black') # Cor do texto
+)
+
+# Une o gráfico base, o contorno e os rótulos
+chart = (base + overlay + text).configure_axis(
+    labelFontSize=14,
+    titleFontSize=14
+)
+
+st.altair_chart(chart, use_container_width=True)
 
     except Exception:
         st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")

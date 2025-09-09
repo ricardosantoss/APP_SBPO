@@ -628,6 +628,7 @@ with tabs[1]:
         )
 
 # ================== EXEMPLOS ==================
+# ================== EXEMPLOS ==================
 with tabs[2]:
     style_title("Exemplos")
 
@@ -709,38 +710,33 @@ with tabs[2]:
 
         for mdl, raw_list in models_lists.items():
             lst = unique_preserve(_as_list(raw_list))
-            # mapa code_norm -> primeira posição
             for pos, code in enumerate(lst):
                 cn = normalize_code(code)
                 form_counter[cn][code] += 1
 
-                # pluralidade: conta 1 por modelo (presença)
+                # pluralidade total
                 freq_all[cn] += 1
-                # borda_all: peso decrescente por posição (quanto mais alto, mais ponto)
-                # aqui usamos um peso simples baseado no tamanho da lista
+                # borda total (peso decrescente por posição)
                 score_all[cn] += max(0, len(lst) - pos)
 
-                # avg_rank
+                # média de posição
                 rank_sum[cn] += (pos + 1)
                 rank_cnt[cn] += 1
 
                 # versões @k
                 if pos < k:
-                    freq_k[cn] += 1
-                    score_k[cn] += (k - pos)  # borda @k
+                    freq_k[cn]  += 1
+                    score_k[cn] += (k - pos)
 
-        # escolher a "melhor" forma para exibir cada código (mais frequente entre originais)
-        display_map = {}
-        for cn, ctr in form_counter.items():
-            display_map[cn] = ctr.most_common(1)[0][0]
+        # forma de exibição preferida
+        display_map = {cn: ctr.most_common(1)[0][0] for cn, ctr in form_counter.items()}
 
-        # empates: ordenar por métrica @k e desempatar por total e avg_rank (menor melhor)
+        # ordenações
         def to_plural_list():
             items = []
             for cn in set(list(freq_all.keys()) + list(freq_k.keys())):
                 avg_rank = (rank_sum[cn] / rank_cnt[cn]) if rank_cnt[cn] else 9999
                 items.append((cn, freq_k[cn], freq_all[cn], avg_rank))
-            # ordena: freq_k desc, freq_all desc, avg_rank asc, alfabético
             items.sort(key=lambda t: (-t[1], -t[2], t[3], t[0]))
             return items
 
@@ -749,7 +745,6 @@ with tabs[2]:
             for cn in set(list(score_all.keys()) + list(score_k.keys())):
                 avg_rank = (rank_sum[cn] / rank_cnt[cn]) if rank_cnt[cn] else 9999
                 items.append((cn, score_k[cn], score_all[cn], avg_rank))
-            # ordena: score_k desc, score_all desc, avg_rank asc, alfabético
             items.sort(key=lambda t: (-t[1], -t[2], t[3], t[0]))
             return items
 
@@ -780,7 +775,7 @@ with tabs[2]:
         st.warning("Nenhum modelo encontrado neste exemplo.")
         st.stop()
 
-    # Limpeza de chaves "não-modelo" (mantém tudo que pareça modelo; não depende de nomes específicos)
+    # Limpeza de chaves "não-modelo"
     def is_noise_key(raw_name: str) -> bool:
         n = _norm(raw_name)
         return (
@@ -797,8 +792,7 @@ with tabs[2]:
         pretty = pretty_model_name(raw_name)
         clean_models[pretty] = _as_list(preds)
 
-    # ======= Cálculo online de Pluralidade e Borda (@k) a partir dos INDIVIDUAIS =======
-    # Considera TODOS os modelos presentes (não precisa que Borda/Pluralidade venham no JSON)
+    # ======= Cálculo online de Pluralidade e Borda (@k) =======
     plural_rank, borda_rank, display_map = compute_plurality_and_borda(clean_models, k=k_sel)
 
     # ======= CSS para chips =======
@@ -806,9 +800,11 @@ with tabs[2]:
     <style>
     .chip {display:inline-block;margin:2px 6px 2px 0;padding:6px 10px;border-radius:999px;
            font-weight:600;border:1px solid #e5e7eb;color:#111;background:#F9FAFB;}
-    .ink   {background:#E5E7EB;}               /* cinza para fora do top-k */
-    .topk  {background:#DBEAFE;border-color:#93C5FD;} /* azul claro para top-k */
-    .hit   {box-shadow:0 0 0 2px #10B981 inset;} /* contorno verde se está no ouro */
+    .ink   {background:#E5E7EB;}                              /* cinza fora do top-k */
+    .topk  {background:#DBEAFE;border-color:#93C5FD;}         /* azul claro top-k */
+    .hit   {box-shadow:0 0 0 2px #10B981 inset;}              /* contorno verde (ouro) */
+    .badge {display:inline-block;margin-left:6px;padding:2px 7px;border-radius:999px;
+            font-weight:700;font-size:0.78rem;color:#111;background:#fde68a;border:1px solid #f59e0b;}
     .legend {font-size:0.9rem;color:#444}
     </style>
     """, unsafe_allow_html=True)
@@ -816,13 +812,18 @@ with tabs[2]:
     st.markdown(
         "<div class='legend'>Legenda: <span class='chip topk'>Top-k</span> "
         "<span class='chip ink'>Fora do k</span> "
-        "<span class='chip hit'>Acerto (no ouro)</span></div>",
+        "<span class='chip hit'>Acerto (no ouro)</span> "
+        "<span class='badge'>nº</span> valor do código (votos/pts) no agregado</div>",
         unsafe_allow_html=True
     )
 
-    # ======= Render: esquerda = modelos; direita = agregados calculados =======
-    def render_pred_list(name, ordered_codes, k, gold_norm):
-        """Mostra TODOS os códigos, destacando os k primeiros e acertos."""
+    # ======= Render helper =======
+    def render_pred_list(name, ordered_codes, k, gold_norm, annotations=None, ann_suffix=""):
+        """
+        Mostra TODOS os códigos, destacando os k primeiros e acertos.
+        annotations: dict[str_normalizada] -> número a exibir no badge
+        ann_suffix:  rótulo curto (ex.: 'v' p/ votos, 'pts' p/ pontos) — só para caption abaixo
+        """
         uniq = unique_preserve(ordered_codes)
         chips = []
         for i, code in enumerate(uniq):
@@ -831,7 +832,11 @@ with tabs[2]:
             if i < k: cls.append("topk")
             else:     cls.append("ink")
             if cn in gold_norm: cls.append("hit")
-            chips.append(f"<span class='{' '.join(cls)}'>{code}</span>")
+            # badge (apenas se houver anotação)
+            badge_html = ""
+            if annotations is not None and cn in annotations:
+                badge_html = f"<span class='badge'>{annotations[cn]}</span>"
+            chips.append(f"<span class='{' '.join(cls)}'>{code}{badge_html}</span>")
         st.markdown(f"**{name}**", unsafe_allow_html=True)
         st.markdown(" ".join(chips) if chips else "—", unsafe_allow_html=True)
 
@@ -843,7 +848,6 @@ with tabs[2]:
         if not clean_models:
             st.info("Sem modelos individuais neste caso.")
         else:
-            # ordem alfabética por nome "bonito"
             for mdl_name in sorted(clean_models.keys()):
                 render_pred_list(mdl_name, clean_models[mdl_name], k_sel, gold_norm)
 
@@ -852,22 +856,28 @@ with tabs[2]:
         style_subtitle("Agregados (calculados agora)")
 
         # --- Pluralidade ---
-        # usamos ranking por freq_k (desc) → freq_all (desc) → avg_rank (asc)
+        # ranking por freq_k desc → freq_all desc → avg_rank asc
         plural_codes_ordered = [display_map[cn] for (cn, _, _, _) in plural_rank]
-        render_pred_list("Pluralidade (freq @k)", plural_codes_ordered, k_sel, gold_norm)
+        # mapa de votos @k por código normalizado
+        plural_votes_map = {cn: frk for (cn, frk, _, _) in plural_rank}
+        render_pred_list("Pluralidade (freq @k)", plural_codes_ordered, k_sel, gold_norm,
+                         annotations=plural_votes_map, ann_suffix="v")
 
-        # Exibir um pequeno resumo de contagens para top-k:
         if plural_rank:
-            topk_set = set(normalize_code(display_map[cn]) for cn, _, _, _ in plural_rank[:k_sel])
             total_votos_k = sum(frk for _, frk, _, _ in plural_rank)
+            st.caption(f"Pluralidade @k: soma total de votos nos top-k dos modelos = {total_votos_k}")
 
         st.divider()
 
         # --- Borda ---
-        # usamos ranking por score_k (desc) → score_all (desc) → avg_rank (asc)
+        # ranking por score_k desc → score_all desc → avg_rank asc
         borda_codes_ordered = [display_map[cn] for (cn, _, _, _) in borda_rank]
-        render_pred_list("Borda (pontuação @k)", borda_codes_ordered, k_sel, gold_norm)
+        # mapa de pontos @k por código normalizado
+        borda_points_map = {cn: sc for (cn, sc, _, _) in borda_rank}
+        render_pred_list("Borda (pontuação @k)", borda_codes_ordered, k_sel, gold_norm,
+                         annotations=borda_points_map, ann_suffix="pts")
 
         if borda_rank:
             total_pontos_k = sum(sc for _, sc, _, _ in borda_rank)
-            
+            st.caption(f"Borda @k: soma total de pontos nos top-k dos modelos = {total_pontos_k}")
+

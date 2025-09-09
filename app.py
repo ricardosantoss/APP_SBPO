@@ -39,9 +39,10 @@ st.set_page_config(
 )
 
 # Paleta (cores bem distintas por MÉTRICA)
-COLOR_PREC = "#F59E0B"   # Precisão  (laranja)
-COLOR_REC  = "#10B981"   # Recall    (verde)
-COLOR_F1   = "#3B82F6"   # F1        (azul)
+# Paleta (cores VIVAS e bem distintas por MÉTRICA)
+COLOR_PREC = "#F97316"    # Precisão   (Laranja Vibrante)
+COLOR_REC  = "#22C55E"    # Recall     (Verde Esmeralda)
+COLOR_F1   = "#3B82F6"    # F1         (Azul Royal)
 PRIMARY    = "#0F3D7A"   # títulos e chips
 SECOND     = "#246BCE"
 

@@ -360,7 +360,7 @@ with tabs[0]:
             )
             
             text = base.mark_text(
-                align='center', baseline='bottom', dy=0, fontSize=15
+                align='center', baseline='bottom', dx=2, dy=0, fontSize=15
             ).encode(
                 text=alt.Text('Valor:Q', format='.3f'),
                 color=alt.value('black'),

@@ -374,9 +374,9 @@ with tabs[0]:
             )
             
             text = base.mark_text(
-                align='center', baseline='bottom', dx=5, dy=0, fontSize=12
+                align='center', baseline='bottom', dx=5, dy=0, fontSize=10
             ).encode(
-                text=alt.Text('Valor:Q', format='.3f'),
+                text=alt.Text('Valor:Q', format='.2f'),
                 color=alt.value('black'),
                 xOffset="Métrica:N",
             )

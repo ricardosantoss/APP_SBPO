@@ -1,29 +1,4 @@
-# -------- nomes bonitos para exibição --------
-def pretty_model_name(raw: str) -> str:
-    """
-    Converte rótulos do CSV para os nomes desejados para exibição:
-      GPT-4o • Deep-Seek V-3 • Sabia 3.1 • Pluralidade • Borda • Gemini 1.5 Flash • GPT 4o-Mini
-    """
-    m = _norm(raw).replace("\u2011", "-")  # normaliza
-
-    # Agregados primeiro
-    if "borda" in m: return "Borda"
-    if "plural" in m: return "Pluralidade"
-    
-    # Modelos (com as novas regras)
-    if "4o-mini" in m or "gpt-4o-mini" in m or "gpt 4o-mini" in m or "gpt-mini" in m:
-        return "GPT 4o-Mini"
-    if "gpt-4o" in m or "gpt 4o" in m:
-        return "GPT-4o"
-    if "deep" in m and "seek" in m:
-        return "Deep-Seek V-3"
-    if "sabi" in m or "maritalk" in m:  # cobre "sabia", "sabiá" e agora "maritalk"
-        return "Sabia 3.1"
-    if "gemini" in m:  # captura "gemini", "gemini 1.5 flash", etc.
-        return "Gemini 1.5 Flash"
-        
-    # fallback: mantém original
-    return str(raw).strip()# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import os
 import re
 import json
@@ -36,7 +11,7 @@ st.set_page_config(
     page_title="CID-10 • Ensemble",
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="collapsed",   # evita “respiro” do sidebar
+    initial_sidebar_state="collapsed",
 )
 
 # --- Injeta PWA sem adicionar altura/espaço visual ---
@@ -80,13 +55,11 @@ h2 { margin-top: .15rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
-
-# Paleta (cores bem distintas por MÉTRICA)
-# Paleta (cores VIVAS e bem distintas por MÉTRICA)
-COLOR_PREC = "#F97316"    # Precisão   (Laranja Vibrante)
-COLOR_REC  = "#22C55E"    # Recall     (Verde Esmeralda)
-COLOR_F1   = "#3B82F6"    # F1         (Azul Royal)
-PRIMARY    = "#0F3D7A"   # títulos e chips
+# ================== PALETA ==================
+COLOR_PREC = "#F97316"    # Precisão
+COLOR_REC  = "#22C55E"    # Recall
+COLOR_F1   = "#3B82F6"    # F1
+PRIMARY    = "#0F3D7A"    # títulos e chips
 SECOND     = "#246BCE"
 
 # ================== HELPERS ==================
@@ -94,6 +67,32 @@ def _norm(s: str) -> str:
     """normaliza string (minúsculas, sem acento) para casar nomes/labels."""
     s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode("ascii")
     return s.lower().strip()
+
+def pretty_model_name(raw: str) -> str:
+    """
+    Converte rótulos do CSV para os nomes desejados para exibição:
+      GPT-4o • Deep-Seek V-3 • Sabia 3.1 • Pluralidade • Borda • Gemini 1.5 Flash • GPT 4o-Mini
+    """
+    m = _norm(raw).replace("\u2011", "-")  # normaliza
+
+    # Agregados primeiro
+    if "borda" in m: return "Borda"
+    if "plural" in m: return "Pluralidade"
+    
+    # Modelos (com as novas regras)
+    if ("4o-mini" in m) or ("gpt-4o-mini" in m) or ("gpt 4o-mini" in m) or ("gpt-mini" in m):
+        return "GPT 4o-Mini"
+    if ("gpt-4o" in m) or ("gpt 4o" in m):
+        return "GPT-4o"
+    if ("deep" in m) and ("seek" in m):
+        return "Deep-Seek V-3"
+    if ("sabi" in m) or ("maritalk" in m):  # cobre "sabia", "sabiá" e "maritalk"
+        return "Sabia 3.1"
+    if "gemini" in m:  # captura "gemini", "gemini 1.5 flash", etc.
+        return "Gemini 1.5 Flash"
+        
+    # fallback: mantém original
+    return str(raw).strip()
 
 @st.cache_data(show_spinner=False)
 def load_csv(path: str) -> pd.DataFrame:
@@ -193,34 +192,6 @@ def best_individual_delta(df_slice: pd.DataFrame, f1_col: str):
     delta_plural = (None if val_plural is None else (val_plural - best_val))
     return (best_name, best_val, val_borda, val_plural, delta_borda, delta_plural)
 
-# -------- nomes bonitos para exibição --------
-# -------- nomes bonitos para exibição --------
-def pretty_model_name(raw: str) -> str:
-    """
-    Converte rótulos do CSV para os nomes desejados para exibição:
-      GPT-4o • Deep-Seek V-3 • Sabia 3.1 • Pluralidade • Borda • Gemini 1.5 Flash • GPT 4o-Mini
-    """
-    m = _norm(raw).replace("\u2011", "-")  # normaliza
-
-    # Agregados primeiro
-    if "borda" in m: return "Borda"
-    if "plural" in m: return "Pluralidade"
-    
-    # Modelos (com as novas regras)
-    if "4o-mini" in m or "gpt-4o-mini" in m or "gpt 4o-mini" in m or "gpt-mini" in m:
-        return "GPT 4o-Mini"
-    if "gpt-4o" in m or "gpt 4o" in m:
-        return "GPT-4o"
-    if "deep" in m and "seek" in m:
-        return "Deep-Seek V-3"
-    if "sabi" in m or "maritalk" in m:  # cobre "sabia", "sabiá" e agora "maritalk"
-        return "Sabia 3.1"
-    if "gemini" in m:  # captura "gemini", "gemini 1.5 flash", etc.
-        return "Gemini 1.5 Flash"
-        
-    # fallback: mantém original
-    return str(raw).strip()
-
 def style_title(txt: str):
     st.markdown(f"<h2 style='margin-top:0.25rem;color:{PRIMARY};'>{txt}</h2>", unsafe_allow_html=True)
 
@@ -255,7 +226,6 @@ df = load_csv(csv_path)
 stats = load_json(json_path)
 
 # ================== HEADER ==================
-# ================== HEADER ==================
 st.markdown(
     f"""
     <div style="padding:4px 0 0 0; text-align:left;">
@@ -274,13 +244,10 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
 # ================== ABAS ==================
 tabs = st.tabs(["🗂️ Dashboard", "📊 Estatísticas", "🧪 Exemplos"])
 
-
 # ================== DASHBOARD ==================
-
 with tabs[0]:
     style_title("Dashboard")
 
@@ -291,6 +258,16 @@ with tabs[0]:
         horizontal=True,
         label_visibility="collapsed"
     )
+
+    # --------- TAMANHOS APENAS DOS GRÁFICOS (reduz nomes) ---------
+    ALT_FONTS = {
+        "axis_label": 10,   # rótulos do eixo (nomes dos modelos)
+        "axis_title": 12,   # título do eixo
+        "legend_label": 10, # rótulos da legenda
+        "legend_title": 11, # título da legenda
+        "title": 14,        # título do gráfico
+        "mark_text": 8      # valores sobre as barras/linhas
+    }
 
     # --- MODO 1: COMPARAR DIFERENTES MODELOS ---
     if modo_analise == "Comparar Modelos":
@@ -349,7 +326,7 @@ with tabs[0]:
         df_f1_scores = df_plot[df_plot["Métrica"] == "F1"].sort_values("Valor", ascending=False)
         order_domain = df_f1_scores["Modelo"].tolist()
 
-        # --- Gráfico de Barras Agrupadas ---
+        # --- Gráfico de Barras Agrupadas (com rótulos menores) ---
         try:
             import altair as alt
 
@@ -357,12 +334,46 @@ with tabs[0]:
 
             base = (
                 alt.Chart(df_plot).mark_bar().encode(
-                    x=alt.X("Modelo:N", scale=alt.Scale(domain=order_domain), axis=alt.Axis(title=None, labelAngle=0, labelFontSize=14, labelColor="#222")),
-                    y=alt.Y("Valor:Q", title=f"{agg_choice} (valor)"),
-                    color=alt.Color("Métrica:N", scale=alt.Scale(domain=list(METRIC_COLORS.keys()), range=[METRIC_COLORS[m] for m in METRIC_COLORS]), legend=alt.Legend(title="Métrica")),
+                    x=alt.X(
+                        "Modelo:N",
+                        scale=alt.Scale(domain=order_domain),
+                        axis=alt.Axis(
+                            title=None,
+                            labelAngle=0,
+                            labelFontSize=ALT_FONTS["axis_label"],  # ↓ menor
+                            labelLimit=110,
+                            labelColor="#222"
+                        )
+                    ),
+                    y=alt.Y(
+                        "Valor:Q",
+                        title=f"{agg_choice} (valor)",
+                        axis=alt.Axis(
+                            titleFontSize=ALT_FONTS["axis_title"],
+                            labelFontSize=ALT_FONTS["axis_label"]
+                        )
+                    ),
+                    color=alt.Color(
+                        "Métrica:N",
+                        scale=alt.Scale(
+                            domain=list(METRIC_COLORS.keys()),
+                            range=[METRIC_COLORS[m] for m in METRIC_COLORS]
+                        ),
+                        legend=alt.Legend(
+                            title="Métrica",
+                            titleFontSize=ALT_FONTS["legend_title"],
+                            labelFontSize=ALT_FONTS["legend_label"]
+                        )
+                    ),
                     xOffset="Métrica:N",
                     tooltip=["Modelo", "Métrica", alt.Tooltip("Valor:Q", format=".4f")]
-                ).properties(height=460)
+                ).properties(height=460, title=alt.TitleParams(text="", fontSize=ALT_FONTS["title"]))
+            ).configure_axis(
+                labelFontSize=ALT_FONTS["axis_label"],
+                titleFontSize=ALT_FONTS["axis_title"]
+            ).configure_legend(
+                labelFontSize=ALT_FONTS["legend_label"],
+                titleFontSize=ALT_FONTS["legend_title"]
             )
 
             overlay = (
@@ -374,7 +385,7 @@ with tabs[0]:
             )
             
             text = base.mark_text(
-                align='center', baseline='bottom', dx=2, dy=0, fontSize=8
+                align='center', baseline='bottom', dx=2, dy=0, fontSize=ALT_FONTS["mark_text"]  # ↓ menor
             ).encode(
                 text=alt.Text('Valor:Q', format='.2f'),
                 color=alt.value('black'),
@@ -443,22 +454,43 @@ with tabs[0]:
             import altair as alt
 
             METRIC_COLORS = {"Precisão": COLOR_PREC, "Recall": COLOR_REC, "F1": COLOR_F1}
-            line_chart = alt.Chart(df_plot_k).mark_line(point=True, strokeWidth=3).encode(
-                x=alt.X('k:O', title='Valor de k', axis=alt.Axis(labelAngle=0)),
-                y=alt.Y('Valor:Q', title=f'Valor da Métrica ({agg_choice})', scale=alt.Scale(zero=False)),
-                color=alt.Color("Métrica:N", scale=alt.Scale(domain=list(METRIC_COLORS.keys()), range=[METRIC_COLORS[m] for m in METRIC_COLORS]), legend=alt.Legend(title="Métrica")),
-                tooltip=['k', 'Métrica', alt.Tooltip('Valor:Q', format='.4f')]
-            ).properties(
-                title=f"Desempenho de '{modelo_selecionado_pretty}' por 'k'",
-                height=450
-            ).configure_title(fontSize=20)
-            
+            line_chart = (
+                alt.Chart(df_plot_k).mark_line(point=True, strokeWidth=3).encode(
+                    x=alt.X(
+                        'k:O', title='Valor de k',
+                        axis=alt.Axis(
+                            labelAngle=0,
+                            labelFontSize=ALT_FONTS["axis_label"],
+                            titleFontSize=ALT_FONTS["axis_title"]
+                        )
+                    ),
+                    y=alt.Y(
+                        'Valor:Q', title=f'Valor da Métrica ({agg_choice})',
+                        scale=alt.Scale(zero=False),
+                        axis=alt.Axis(
+                            labelFontSize=ALT_FONTS["axis_label"],
+                            titleFontSize=ALT_FONTS["axis_title"]
+                        )
+                    ),
+                    color=alt.Color(
+                        "Métrica:N",
+                        scale=alt.Scale(domain=list(METRIC_COLORS.keys()), range=[METRIC_COLORS[m] for m in METRIC_COLORS]),
+                        legend=alt.Legend(title="Métrica", titleFontSize=ALT_FONTS["legend_title"], labelFontSize=ALT_FONTS["legend_label"])
+                    ),
+                    tooltip=['k', 'Métrica', alt.Tooltip('Valor:Q', format='.4f')]
+                )
+                .properties(
+                    title=alt.TitleParams(text=f"Desempenho de '{modelo_selecionado_pretty}' por 'k'", fontSize=ALT_FONTS["title"]),
+                    height=450
+                )
+                .configure_axis(labelFontSize=ALT_FONTS["axis_label"], titleFontSize=ALT_FONTS["axis_title"])
+                .configure_legend(labelFontSize=ALT_FONTS["legend_label"], titleFontSize=ALT_FONTS["legend_title"])
+            )
             st.altair_chart(line_chart, use_container_width=True)
 
         except Exception:
             st.info("Para o gráfico, inclua 'altair' no requirements.txt. Exibindo tabela como fallback.")
             st.dataframe(df_plot_k, use_container_width=True)
-
 
 # ================== ESTATÍSTICAS ==================
 with tabs[1]:
@@ -738,7 +770,6 @@ with tabs[1]:
         )
 
 # ================== EXEMPLOS ==================
-# ================== EXEMPLOS ==================
 @st.cache_data(show_spinner=False)
 def load_examples(path: str):
     try:
@@ -762,7 +793,7 @@ with tabs[2]:
 
     # Carrega examples.json (na mesma pasta do app)
     EXAMPLES_PATH = os.path.join(DATA_DIR, "examples.json")
-    examples = load_examples(EXAMPLES_PATH)
+    examples = load_examples(EXPALES_PATH) if False else load_examples(EXAMPLES_PATH)  # proteção
 
     if not examples:
         st.info("Nenhum exemplo encontrado. Certifique-se de que **examples.json** está na raiz do app.")
@@ -794,7 +825,7 @@ with tabs[2]:
             lst = _to_codes(codes)
             n = len(lst)
             for i, code in enumerate(lst):
-                weight = n - i  # 1º vale n, 2º vale n-1, ..., até 1
+                weight = n - i  # 1º vale N, 2º vale N-1, ..., até 1
                 score[code] += weight
         return score
 
@@ -938,3 +969,4 @@ with tabs[2]:
                        "1º vale N, 2º vale N-1, ..., até 1 (onde N é o tamanho da lista daquele modelo).")
         else:
             st.info("Borda: sem pontuações (não há predições nos modelos).")
+

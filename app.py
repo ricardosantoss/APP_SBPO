@@ -32,39 +32,53 @@ import pandas as pd
 import streamlit as st
 
 # ================== CONFIG DA PÁGINA ==================
-# ================== CONFIG DA PÁGINA ==================
 st.set_page_config(
     page_title="CID-10 • Ensemble",
     page_icon="🧠",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed",   # evita “respiro” do sidebar
 )
 
-# INJETAR CÓDIGO PARA PWA E ESTILOS DE TABLET
-pwa_code = """
+# --- Injeta PWA sem adicionar altura/espaço visual ---
+import streamlit.components.v1 as components
+components.html(
+    """
     <link rel="manifest" href="manifest.json">
     <script>
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('service-worker.js');
-        }
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('service-worker.js');
+      }
     </script>
-"""
-st.markdown(pwa_code, unsafe_allow_html=True)
+    """,
+    height=0
+)
 
-# ESTILOS CSS PARA UMA APARÊNCIA MAIS NATIVA
-css_tablet_style = """
+# ================== ESTILOS (reduzir respiro no topo) ==================
+st.markdown("""
 <style>
-    /* Esconde o menu hamburger e o rodapé "Made with Streamlit" */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+/* remove espaços padrão do topo do app */
+[data-testid="stAppViewContainer"] { padding-top: 0 !important; }
+section.main > div.block-container { padding-top: .25rem !important; }
 
-    /* Melhora o espaçamento e o tamanho dos filtros para toque */
-    .stRadio > div, .stSelectbox > div {
-        padding: 0.5rem 0;
-    }
+/* mobile/tablet ainda mais compacto */
+@media (max-width: 820px){
+  section.main > div.block-container { padding-top: .15rem !important; }
+}
+
+/* esconde cabeçalho/rodapé do Streamlit */
+#MainMenu, header, footer {visibility: hidden;}
+
+/* título e subtítulo com margem mínima */
+h1 { margin-top: .15rem !important; }
+h2 { margin-top: .15rem !important; }
+
+/* reduz margem vertical padrão criada por <p> gerados pelo markdown */
+.block-container p { margin-top: .25rem; }
+
+/* melhora espaçamento de controles para toque sem aumentar topo */
+.stRadio > div, .stSelectbox > div { padding: .35rem 0; }
 </style>
-"""
-st.markdown(css_tablet_style, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 
 # Paleta (cores bem distintas por MÉTRICA)
